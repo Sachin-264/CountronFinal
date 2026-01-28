@@ -107,7 +107,8 @@ class _DeviceSelectionScreenState extends State<DeviceSelectionScreen> {
   // === API FETCH LOGIC (Unchanged) ===
   Future<void> _fetchDevices() async {
     try {
-      String baseUrl ='{$ApiConstants.baseUrl}/client_api.php';
+      String baseUrl = '${ApiConstants.baseUrl}/client_api.php';
+
       final response = await http.post(
         Uri.parse(baseUrl),
         headers: {"Content-Type": "application/json"},
