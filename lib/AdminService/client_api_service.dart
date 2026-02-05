@@ -27,6 +27,51 @@ class ClientApiService {
     }
   }
 
+  Future<int> getDeviceChannelLimit(int deviceRecNo) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl$_deviceEndpoint'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'GETLIMIT',
+        'RecNo': deviceRecNo,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['status'] == 'success') {
+        // Return the limit (default to 0 if null)
+        return data['data']['ClientChannelLimit'] ?? 0;
+      } else {
+        throw Exception(data['error'] ?? 'Failed to fetch limit');
+      }
+    } else {
+      throw Exception('Server error: ${response.statusCode}');
+    }
+  }
+
+  Future<bool> updateDeviceChannelLimit({
+    required int recNo,
+    required int limit,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl$_deviceEndpoint'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'action': 'UPDATELIMIT',
+        'RecNo': recNo,
+        'ClientChannelLimit': limit,
+      }),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['status'] == 'success';
+    }
+    return false;
+  }
+
+
 
   // 1. Get all clients (FIXED: Added data transformation)
   Future<List<Map<String, dynamic>>> getAllClients() async {
@@ -183,7 +228,29 @@ class ClientApiService {
     }
   }
 
+// Fetch the next available RecNo for a new device
+  Future<int> getNextDeviceRecNo() async {
+    final response = await http.post(
+      Uri.parse('$baseUrl$_deviceEndpoint'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'action': 'GETNEXTID'}),
+    );
+
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      if (data['status'] == 'success') {
+        return data['next_recno'] as int;
+      } else {
+        throw Exception(data['error'] ?? 'Failed to fetch next ID');
+      }
+    } else {
+      throw Exception('Server error: ${response.statusCode}');
+    }
+  }
+
+  // Update registerDevice to accept the generated RecNo
   Future<Map<String, dynamic>> registerDevice({
+    required int recNo, // Pass the generated ID here
     required int clientRecNo,
     required String deviceName,
     required String serialNumber,
@@ -195,6 +262,7 @@ class ClientApiService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({
         'action': 'INSERT',
+        'RecNo': recNo, // Now sending the manually generated ID
         'ClientRecNo': clientRecNo,
         'DeviceName': deviceName,
         'SerialNumber': serialNumber,

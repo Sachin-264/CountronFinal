@@ -10,6 +10,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../AdminService/input_type_api_service.dart';
+import '../AdminService/client_api_service.dart'; // NEW IMPORT
 import '../theme/client_theme.dart';
 import '../widgets/constants.dart';
 
@@ -38,10 +39,11 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
   late Map<int, bool> _channelSelection;
   bool _isSaving = false;
 
-  // 閥 NEW: Loading state for auto-refresh
-  bool _isLoading = false;
+  // NEW: Loading state for auto-refresh
+  bool _isLoading = true; // Default true to allow initial setup
 
   final InputTypeApiService _inputTypeService = InputTypeApiService();
+  final ClientApiService _clientApiService = ClientApiService(); // NEW SERVICE
 
   // Cache input types to prevent refetching
   bool _isInputMasterLoading = true;
@@ -50,23 +52,51 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
   // Local state for all channels to allow real-time updates after edit
   late List<dynamic> _mutableChannels;
 
+  // NEW: Store the channel limit
+  int _currentChannelLimit = 0;
+
   @override
   void initState() {
     super.initState();
+    _mutableChannels = [];
+    _channelSelection = {};
 
-    // 閥 FIX: Check if passed channels are empty. If so, fetch them!
-    if (widget.allChannels.isEmpty) {
-      _mutableChannels = [];
-      _channelSelection = {};
-      _fetchChannelsFromApi(); // Auto-refresh data
-    } else {
-      _initializeData(widget.allChannels);
-    }
+    // Start the setup sequence: Fetch Limit -> Filter Channels -> Load Data
+    _initialSetup();
 
     _fetchInputTypes(); // FETCH INPUT TYPES ON INIT
   }
 
-  // 閥 NEW: Helper to initialize data structure
+  // 閥 NEW: Setup Sequence
+  Future<void> _initialSetup() async {
+    setState(() => _isLoading = true);
+    try {
+      // 1. Fetch the Channel Limit for this device
+      _currentChannelLimit = await _clientApiService.getDeviceChannelLimit(widget.deviceRecNo);
+
+      // 2. Load Channels (either from widget or API)
+      if (widget.allChannels.isEmpty) {
+        await _fetchChannelsFromApi();
+      } else {
+        // Apply limit to passed channels
+        List<dynamic> channels = List.from(widget.allChannels);
+        if (_currentChannelLimit > 0 && channels.length > _currentChannelLimit) {
+          channels = channels.sublist(0, _currentChannelLimit);
+        }
+        _initializeData(channels);
+        setState(() => _isLoading = false);
+      }
+    } catch (e) {
+      print("Setup Error: $e");
+      // Fallback: load whatever we have without limit if error
+      if(widget.allChannels.isNotEmpty && _mutableChannels.isEmpty) {
+        _initializeData(widget.allChannels);
+      }
+      setState(() => _isLoading = false);
+    }
+  }
+
+  // Helper to initialize data structure
   void _initializeData(List<dynamic> channels) {
     _mutableChannels = List<dynamic>.from(channels);
     _channelSelection = {
@@ -77,10 +107,11 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
     };
   }
 
-  // 閥 NEW: Fetch Channels directly if Provider was empty (Auto-Refresh Logic)
+  // 閥 NEW: Fetch Channels directly (Auto-Refresh Logic)
   Future<void> _fetchChannelsFromApi() async {
     if (!mounted) return;
-    setState(() => _isLoading = true);
+    // Only set loading if not already part of initial setup
+    if (!_isLoading) setState(() => _isLoading = true);
 
     try {
       final response = await http.post(
@@ -96,8 +127,15 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
         final result = jsonDecode(response.body);
         if (result['status'] == 'success') {
           if (mounted) {
+            List<dynamic> fetchedChannels = result['data'];
+
+            // 3. Apply Limit Filter
+            if (_currentChannelLimit > 0 && fetchedChannels.length > _currentChannelLimit) {
+              fetchedChannels = fetchedChannels.sublist(0, _currentChannelLimit);
+            }
+
             setState(() {
-              _initializeData(result['data']);
+              _initializeData(fetchedChannels);
               _isLoading = false;
             });
           }
@@ -260,7 +298,7 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
     }
   }
 
-  // 🔴 ADDED: Button to Select/Deselect All Channels
+  // Button to Select/Deselect All Channels
   Widget _buildSelectAllButton() {
     final bool isAllSelected = _channelSelection.isNotEmpty && _channelSelection.values.every((isSelected) => isSelected);
 
@@ -319,14 +357,14 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // 閥 NEW: Show Loader when Auto-Refreshing or Loading Inputs
+    // Show Loader when Auto-Refreshing or Loading Inputs
     if (_isLoading || _isInputMasterLoading) {
       return Center(child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
           CircularProgressIndicator(color: ClientTheme.primaryColor),
           const SizedBox(height: 16),
-          Text(_isLoading ? "Fetching Channel Data..." : "Loading Configuration...",
+          Text(_isLoading ? "Checking Channel Limits..." : "Loading Configuration...",
               style: ClientTheme.themeData.textTheme.titleMedium),
         ],
       ));
@@ -353,10 +391,16 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                         "Channel Setup",
                         style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: ClientTheme.textDark),
                       ),
+                      // Optional: Show limit indicator
+                      if (_currentChannelLimit > 0)
+                        Text(
+                          "Access Restricted to First $_currentChannelLimit Channels",
+                          style: TextStyle(fontSize: 10, color: ClientTheme.error, fontWeight: FontWeight.bold),
+                        )
                     ],
                   ),
                 ),
-                // 🔴 ADDED: Select All Button here
+                // Select All Button here
                 const SizedBox(width: 8),
                 _buildSelectAllButton(),
                 const SizedBox(width: 8),
@@ -373,9 +417,9 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                   children: [
                     Text("No channels available.", style: ClientTheme.themeData.textTheme.titleLarge),
                     const SizedBox(height: 10),
-                    // 閥 NEW: Retry Button
+                    // Retry Button
                     ElevatedButton.icon(
-                      onPressed: _fetchChannelsFromApi,
+                      onPressed: _initialSetup,
                       icon: const Icon(Iconsax.refresh, size: 18),
                       label: const Text("Retry"),
                     )

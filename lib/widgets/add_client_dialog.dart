@@ -233,17 +233,16 @@ class _AddClientScreenState extends State<AddClientScreen> {
 
   // === NAYA: Updated Finish Setup - Validates new Step 3 ===
   Future<void> _finishSetup() async {
-    // NAYA: Add validation for the new combined step
     if (_addedDevices.isEmpty) {
       _showErrorSnackbar('Please add at least one device.');
       return;
     }
 
-    if (_step3FormKey.currentState!.validate()) { // Use the key for the new step
+    if (_step3FormKey.currentState!.validate()) {
       setState(() => _isLoading = true);
 
       try {
-        // --- 1. Client Banayein ---
+        // 1. Create Client
         final newClient = await _apiService.createClient(
           adminRecNo: 12,
           username: _usernameController.text,
@@ -255,10 +254,23 @@ class _AddClientScreenState extends State<AddClientScreen> {
         );
         _createdClientRecNo = newClient['RecNo'];
 
-        // --- 2. Sabhi Devices ko Register Karein ---
+        // 2. Generate and Register Devices with MMYYxxxx ID
+        final now = DateTime.now();
+        String month = now.month.toString().padLeft(2, '0');
+        String year = now.year.toString().substring(2);
+
         for (int i = 0; i < _addedDevices.length; i++) {
           DeviceData device = _addedDevices[i];
+
+          // Fetch the next global sequence number (xxxx)
+          final int nextIdValue = await _apiService.getNextDeviceRecNo();
+          String paddedId = nextIdValue.toString().padLeft(4, '0');
+
+          // Combine to MMYYxxxx (e.g., 02260001)
+          int generatedRecNo = int.parse('$month$year$paddedId');
+
           final newDevice = await _apiService.registerDevice(
+            recNo: generatedRecNo, // Pass the generated ID
             clientRecNo: _createdClientRecNo!,
             deviceName: device.name,
             serialNumber: device.serial,
@@ -268,7 +280,7 @@ class _AddClientScreenState extends State<AddClientScreen> {
           _deviceRecNoMap[i] = newDevice['RecNo'];
         }
 
-        // --- 3. Sabhi Channels ko Assign Karein ---
+        // 3. Assign Channels
         for (int deviceIndex in _selectedChannelsMap.keys) {
           int deviceRecNo = _deviceRecNoMap[deviceIndex]!;
           List<int?> channels = _selectedChannelsMap[deviceIndex]!;
@@ -285,12 +297,12 @@ class _AddClientScreenState extends State<AddClientScreen> {
           }
         }
 
-        // --- 4. Success Screen ---
         Navigator.pushReplacement(context, MaterialPageRoute(
           builder: (_) => SuccessScreen(
             message: "Client '${_companyNameController.text}' setup complete!",
           ),
         ));
+
         Future.delayed(const Duration(milliseconds: 2500), () {
           if (mounted) {
             widget.onSave?.call(_companyNameController.text);
@@ -301,9 +313,7 @@ class _AddClientScreenState extends State<AddClientScreen> {
       } catch (e) {
         _showErrorSnackbar('Failed to finish setup: $e');
       } finally {
-        if (mounted) {
-          setState(() => _isLoading = false);
-        }
+        if (mounted) setState(() => _isLoading = false);
       }
     }
   }

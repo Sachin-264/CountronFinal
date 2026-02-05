@@ -3,6 +3,7 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart'; // Added for TextInputFormatter
 import 'package:google_fonts/google_fonts.dart';
 import 'package:http/http.dart' as http;
 import 'package:iconsax_flutter/iconsax_flutter.dart';
@@ -10,6 +11,7 @@ import 'package:provider/provider.dart';
 import 'package:file_picker/file_picker.dart';
 
 import '../../AdminService/image_upload_service.dart';
+import '../../AdminService/client_api_service.dart'; // NEW IMPORT
 import '../../ClinetService/setting_api_service.dart';
 import '../../provider/client_provider.dart';
 import '../../theme/client_theme.dart';
@@ -25,6 +27,7 @@ class ClientSettingsScreen extends StatefulWidget {
 
 class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   final SettingsApiService _settingsService = SettingsApiService();
+  final ClientApiService _clientApiService = ClientApiService(); // New Instance
   final ImageUploadService _imageUploadService = ImageUploadService();
 
   final _reportCompanyController = TextEditingController();
@@ -33,6 +36,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   final _emailInputController = TextEditingController();
   final _alarmDelayController = TextEditingController(text: "0");
 
+  // NEW: Controller for Channel Limit
+  final _channelLimitController = TextEditingController();
+
   List<String> _emailList = [];
   String _selectedFrequency = 'Immediate';
   bool _isAlarmEnabled = true;
@@ -40,6 +46,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   bool _isUploadingLogo = false;
   bool _isSavingAlarm = false;
   bool _isSavingFreq = false;
+  bool _isSavingLimit = false; // New loading state
 
   String? _currentReportLogoPath;
   Uint8List? _reportLogoBytes;
@@ -56,6 +63,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _fetchDeviceSettings();
     _fetchAlarmSettings();
     _fetchFrequencySettings();
+    _fetchChannelLimit(); // Fetch the limit on init
   }
 
   @override
@@ -64,11 +72,12 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
     _reportAddressController.dispose();
     _emailInputController.dispose();
     _alarmDelayController.dispose();
+    _channelLimitController.dispose(); // Dispose new controller
     super.dispose();
   }
 
   String _getApiBaseUrl(String endpoint) {
-    return  'ApiConstants.baseUrl$endpoint';
+    return 'ApiConstants.baseUrl$endpoint';
   }
 
   Future<void> _fetchDeviceSettings() async {
@@ -102,6 +111,72 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
       setState(() => _isLoading = false);
       if (success) _showSuccessSnackbar("Branding saved!");
       else _showErrorSnackbar("Failed to save branding.");
+    }
+  }
+
+  // === NEW: Fetch Channel Limit ===
+  Future<void> _fetchChannelLimit() async {
+    final provider = Provider.of<ClientProvider>(context, listen: false);
+    if (provider.selectedDeviceRecNo == null) return;
+
+    try {
+      final limit = await _clientApiService.getDeviceChannelLimit(provider.selectedDeviceRecNo!);
+      if (mounted) {
+        setState(() {
+          _channelLimitController.text = limit.toString();
+        });
+      }
+    } catch (e) {
+      // Handle error silently or show snackbar
+      print("Error fetching limit: $e");
+    }
+  }
+
+  // === NEW: Save Channel Limit ===
+  Future<void> _saveChannelLimit() async {
+    final provider = Provider.of<ClientProvider>(context, listen: false);
+    if (provider.selectedDeviceRecNo == null) return;
+
+    // 1. Get Hardware Max Limit
+    final int hardwareMax = provider.selectedDeviceData?['ChannelsCount'] ?? 0;
+
+    // 2. Get User Input
+    final int inputLimit = int.tryParse(_channelLimitController.text) ?? 0;
+
+    // 3. Validation Logic
+    if (inputLimit < 0) {
+      _showErrorSnackbar("Limit cannot be negative.");
+      return;
+    }
+
+    if (inputLimit > hardwareMax) {
+      _showErrorSnackbar("Limit cannot exceed device capacity ($hardwareMax).");
+      // Reset to max to help user
+      setState(() {
+        _channelLimitController.text = hardwareMax.toString();
+      });
+      return;
+    }
+
+    setState(() => _isSavingLimit = true);
+
+    try {
+      final success = await _clientApiService.updateDeviceChannelLimit(
+        recNo: provider.selectedDeviceRecNo!,
+        limit: inputLimit,
+      );
+
+      if (mounted) {
+        setState(() => _isSavingLimit = false);
+        if (success) {
+          _showSuccessSnackbar("Channel limit updated!");
+        } else {
+          _showErrorSnackbar("Failed to update limit.");
+        }
+      }
+    } catch (e) {
+      if (mounted) setState(() => _isSavingLimit = false);
+      _showErrorSnackbar("Error: $e");
     }
   }
 
@@ -204,6 +279,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                           if (hasDevice) ...[
                             _buildBrandingCard(isDesktop: true),
                             const SizedBox(height: 24),
+                            // NEW: Channel Limit Card
+                            _buildChannelLimitCard(isDesktop: true, provider: provider),
+                            const SizedBox(height: 24),
                             _buildAlarmCard(isDesktop: true),
                             const SizedBox(height: 24),
                             _buildFrequencyCard(isDesktop: true),
@@ -224,6 +302,9 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
                     const SizedBox(height: 20),
                     if (hasDevice) ...[
                       _buildBrandingCard(isDesktop: false),
+                      const SizedBox(height: 20),
+                      // NEW: Channel Limit Card
+                      _buildChannelLimitCard(isDesktop: false, provider: provider),
                       const SizedBox(height: 20),
                       _buildAlarmCard(isDesktop: false),
                       const SizedBox(height: 20),
@@ -366,6 +447,83 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               SizedBox(width: double.infinity, child: _buildSaveButton(_isLoading, _saveDeviceSettings, "Save"))
             ],
           )
+        ],
+      ),
+    );
+  }
+
+  // === NEW: Channel Limit Widget ===
+  Widget _buildChannelLimitCard({required bool isDesktop, required ClientProvider provider}) {
+    final int maxChannels = provider.selectedDeviceData?['ChannelsCount'] ?? 0;
+
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: _cardDecoration(),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Iconsax.slider_horizontal, color: ClientTheme.primaryColor),
+              const SizedBox(width: 10),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Channel Access Limit", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ClientTheme.textDark)),
+                  if(isDesktop) Text("Restrict visible channels (Max: $maxChannels)", style: TextStyle(fontSize: 11, color: Colors.grey)),
+                ],
+              ),
+              const Spacer(),
+              if (isDesktop) _buildSaveButton(_isSavingLimit, _saveChannelLimit, "Update Limit"),
+            ],
+          ),
+          const SizedBox(height: 24),
+
+          Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text("Set Limit", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.grey)),
+                    const SizedBox(height: 6),
+                    SizedBox(
+                      height: 45,
+                      child: TextField(
+                        controller: _channelLimitController,
+                        keyboardType: TextInputType.number,
+                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                        style: const TextStyle(fontSize: 13),
+                        decoration: InputDecoration(
+                            hintText: "Enter limit (0 - $maxChannels)",
+                            prefixIcon: const Icon(Iconsax.sort, size: 16, color: Colors.grey),
+                            suffixText: "/ $maxChannels",
+                            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: Colors.grey.shade300)),
+                            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: ClientTheme.primaryColor)),
+                            filled: true,
+                            fillColor: Colors.grey.shade50
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      "Enter 0 or leave empty to allow all $maxChannels channels.",
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade500, fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+
+              if (isDesktop) const Spacer(flex: 2), // Spacing for desktop layout
+            ],
+          ),
+
+          if (!isDesktop) ...[
+            const SizedBox(height: 20),
+            SizedBox(width: double.infinity, child: _buildSaveButton(_isSavingLimit, _saveChannelLimit, "Update Limit"))
+          ]
         ],
       ),
     );

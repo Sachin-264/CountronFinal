@@ -226,7 +226,18 @@ class _EditClientDialogState extends State<EditClientDialog>
   void _handleAddNewDevice(DeviceData newDevice) async {
     setState(() => _isDeviceLoading = true);
     try {
+      // 1. Generate MMYYxxxx ID
+      final now = DateTime.now();
+      String month = now.month.toString().padLeft(2, '0');
+      String year = now.year.toString().substring(2);
+
+      final int nextIdValue = await _apiService.getNextDeviceRecNo();
+      String paddedId = nextIdValue.toString().padLeft(4, '0');
+      int generatedRecNo = int.parse('$month$year$paddedId');
+
+      // 2. Register with manual ID
       final createdDevice = await _apiService.registerDevice(
+        recNo: generatedRecNo,
         clientRecNo: widget.client['RecNo'],
         deviceName: newDevice.name,
         serialNumber: newDevice.serial,
@@ -254,8 +265,7 @@ class _EditClientDialogState extends State<EditClientDialog>
             for (int c = 0; c < oldChannels.length; c++) {
               String oldKey = "${i}_$c";
               if (_channelMapRecNoMap.containsKey(oldKey)) {
-                newChannelMapRecNoMap["${newIndex}_$c"] =
-                _channelMapRecNoMap[oldKey]!;
+                newChannelMapRecNoMap["${newIndex}_$c"] = _channelMapRecNoMap[oldKey]!;
               }
             }
           }
@@ -264,6 +274,8 @@ class _EditClientDialogState extends State<EditClientDialog>
         _deviceRecNoMap = newDeviceRecNoMap;
         _channelMapRecNoMap = newChannelMapRecNoMap;
       });
+
+      _showSuccessSnackbar('Device Added with ID: $generatedRecNo');
     } catch (e) {
       _showErrorSnackbar('Failed to add device: $e');
     } finally {
