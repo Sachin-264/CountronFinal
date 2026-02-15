@@ -18,14 +18,14 @@ class EditClientDialog extends StatefulWidget {
   final Map<String, dynamic> client;
   final VoidCallback onSave;
   final int initialTabIndex;
-  final String? currentPassword; // [FIX] Added parameter to accept password
+  final String? currentPassword;
 
   const EditClientDialog({
     super.key,
     required this.client,
     required this.onSave,
     this.initialTabIndex = 0,
-    this.currentPassword, // [FIX] Initialize parameter
+    this.currentPassword,
   });
 
   @override
@@ -43,7 +43,7 @@ class _EditClientDialogState extends State<EditClientDialog>
   late TextEditingController _companyNameController;
   late TextEditingController _emailController;
   late TextEditingController _addressController;
-  late TextEditingController _passwordDisplayController; // For display only
+  late TextEditingController _passwordDisplayController;
   bool _isInfoLoading = false;
   String? _currentLogoPath;
 
@@ -57,9 +57,12 @@ class _EditClientDialogState extends State<EditClientDialog>
   List<DeviceData> _addedDevices = [];
   List<Map<String, dynamic>> _allChannels = [];
 
+  // Maps to track IDs and selection
   late Map<int, List<int?>?> _selectedChannelsMap;
   Map<int, int> _deviceRecNoMap = {};
   Map<String, int> _channelMapRecNoMap = {};
+  late TextEditingController _deviceSearchController; //
+  String _deviceSearchQuery = ''; //
 
   static const String _imageBaseUrl =
       "https://storage.googleapis.com/upload-images-34/images/LMS/";
@@ -77,8 +80,6 @@ class _EditClientDialogState extends State<EditClientDialog>
         TextEditingController(text: widget.client['ContactEmail']);
     _addressController =
         TextEditingController(text: widget.client['CompanyAddress']);
-
-    // [FIX] Init Password Controller
     _passwordDisplayController =
         TextEditingController(text: widget.currentPassword ?? "N/A");
 
@@ -87,10 +88,17 @@ class _EditClientDialogState extends State<EditClientDialog>
     // Init Tab 2
     _selectedChannelsMap = {};
     _loadDeviceData();
+    _deviceSearchController = TextEditingController(); //
+    _deviceSearchController.addListener(() {
+      setState(() {
+        _deviceSearchQuery = _deviceSearchController.text.toLowerCase(); //
+      });
+    });
   }
 
   @override
   void dispose() {
+    _deviceSearchController.dispose();
     _tabController.dispose();
     _companyNameController.dispose();
     _emailController.dispose();
@@ -140,7 +148,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     }
   }
 
-  // ... [Keep existing _loadDeviceData, _handleUpdateInfo, etc. logic unchanged] ...
   Future<void> _loadDeviceData() async {
     setState(() => _isDeviceLoading = true);
     try {
@@ -169,6 +176,7 @@ class _EditClientDialogState extends State<EditClientDialog>
           location: device['Location'] ?? '',
         ));
 
+        // Store RecNo mapping
         tempDeviceRecNoMap[sequentialIndex] = device['RecNo'];
 
         List<int?> channels =
@@ -226,7 +234,6 @@ class _EditClientDialogState extends State<EditClientDialog>
   void _handleAddNewDevice(DeviceData newDevice) async {
     setState(() => _isDeviceLoading = true);
     try {
-      // 1. Generate MMYYxxxx ID
       final now = DateTime.now();
       String month = now.month.toString().padLeft(2, '0');
       String year = now.year.toString().substring(2);
@@ -235,7 +242,6 @@ class _EditClientDialogState extends State<EditClientDialog>
       String paddedId = nextIdValue.toString().padLeft(4, '0');
       int generatedRecNo = int.parse('$month$year$paddedId');
 
-      // 2. Register with manual ID
       final createdDevice = await _apiService.registerDevice(
         recNo: generatedRecNo,
         clientRecNo: widget.client['RecNo'],
@@ -251,9 +257,11 @@ class _EditClientDialogState extends State<EditClientDialog>
         final newDeviceRecNoMap = <int, int>{};
         final newChannelMapRecNoMap = <String, int>{};
 
+        // Add new device ID to map at index 0
         newMap[0] = List<int?>.filled(newDevice.channelCount, null);
         newDeviceRecNoMap[0] = createdDevice['RecNo'];
 
+        // Shift existing mappings
         for (int i = 0; i < _addedDevices.length - 1; i++) {
           final newIndex = i + 1;
           newMap[newIndex] = _selectedChannelsMap[i] ?? [];
@@ -265,7 +273,8 @@ class _EditClientDialogState extends State<EditClientDialog>
             for (int c = 0; c < oldChannels.length; c++) {
               String oldKey = "${i}_$c";
               if (_channelMapRecNoMap.containsKey(oldKey)) {
-                newChannelMapRecNoMap["${newIndex}_$c"] = _channelMapRecNoMap[oldKey]!;
+                newChannelMapRecNoMap["${newIndex}_$c"] =
+                _channelMapRecNoMap[oldKey]!;
               }
             }
           }
@@ -302,7 +311,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     }
   }
 
-  // === AUTO-FILL LOGIC ===
   void _showAutoFillDialog(int deviceIndex) {
     int? selectedStartChannelRecNo;
 
@@ -310,17 +318,21 @@ class _EditClientDialogState extends State<EditClientDialog>
       context: context,
       builder: (BuildContext ctx) {
         return AlertDialog(
-          title: Text("Auto-Fill Channels", style: Theme.of(context).textTheme.titleLarge),
+          title: Text("Auto-Fill Channels",
+              style: Theme.of(context).textTheme.titleLarge),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text("Select the starting channel. We will fill subsequent channels automatically."),
+              Text(
+                  "Select the starting channel. We will fill subsequent channels automatically."),
               const SizedBox(height: 16),
               DropdownButtonFormField<int>(
                 decoration: InputDecoration(
                   labelText: 'Start From Channel',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: Icon(Iconsax.radar_2, color: AppTheme.primaryBlue),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  prefixIcon:
+                  Icon(Iconsax.radar_2, color: AppTheme.primaryBlue),
                 ),
                 items: _allChannels.map((channel) {
                   final String label = channel['ChannelID'] != null
@@ -358,7 +370,6 @@ class _EditClientDialogState extends State<EditClientDialog>
   }
 
   void _performAutoFill(int deviceIndex, int startRecNo) {
-    // ... [Keep existing gap-skipping auto-fill logic] ...
     final startChannel = _allChannels.firstWhere(
             (c) => c['RecNo'] == startRecNo,
         orElse: () => {});
@@ -369,7 +380,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     }
 
     String startID = startChannel['ChannelID'].toString();
-
     final RegExp regex = RegExp(r'^([a-zA-Z]+)(\d+)$');
     final match = regex.firstMatch(startID);
 
@@ -390,7 +400,8 @@ class _EditClientDialogState extends State<EditClientDialog>
       int safetyLimit = 0;
 
       while (!foundForThisSlot && safetyLimit < 500) {
-        String targetID = "$prefix${currentNumber.toString().padLeft(padLength, '0')}";
+        String targetID =
+            "$prefix${currentNumber.toString().padLeft(padLength, '0')}";
         currentNumber++;
         safetyLimit++;
 
@@ -420,7 +431,6 @@ class _EditClientDialogState extends State<EditClientDialog>
 
   void _handleChannelChange(
       int deviceIndex, int channelIndex, int? newChannelRecNo) async {
-    // ... [Keep existing logic] ...
     final List<int?>? selectedChannels = _selectedChannelsMap[deviceIndex];
     if (selectedChannels == null) return;
     final int? deviceRecNo = _deviceRecNoMap[deviceIndex];
@@ -474,8 +484,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     }
   }
 
-  // === UPDATED UI CODE STARTS HERE ===
-
   @override
   Widget build(BuildContext context) {
     bool isMobile = MediaQuery.of(context).size.width < 900;
@@ -522,7 +530,10 @@ class _EditClientDialogState extends State<EditClientDialog>
           Flexible(
             child: Text(
               "${widget.client['CompanyName']}",
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+              style: Theme.of(context)
+                  .textTheme
+                  .titleLarge
+                  ?.copyWith(fontWeight: FontWeight.bold),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -535,7 +546,7 @@ class _EditClientDialogState extends State<EditClientDialog>
       content: ConstrainedBox(
         constraints: BoxConstraints(
           maxWidth: 900,
-          maxHeight: MediaQuery.of(context).size.height * 0.85, // Increased slightly
+          maxHeight: MediaQuery.of(context).size.height * 0.85,
         ),
         child: SizedBox(
           width: MediaQuery.of(context).size.width * 0.8,
@@ -565,10 +576,25 @@ class _EditClientDialogState extends State<EditClientDialog>
                     ],
                   ),
                   indicatorPadding: const EdgeInsets.all(4),
-                  labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  labelStyle: const TextStyle(
+                      fontWeight: FontWeight.bold, fontSize: 14),
                   tabs: const [
-                    Tab(child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Iconsax.user, size: 18), SizedBox(width: 8), Text('Client Info')])),
-                    Tab(child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Iconsax.cpu, size: 18), SizedBox(width: 8), Text('Manage Devices')])),
+                    Tab(
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Iconsax.user, size: 18),
+                              SizedBox(width: 8),
+                              Text('Client Info')
+                            ])),
+                    Tab(
+                        child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Iconsax.cpu, size: 18),
+                              SizedBox(width: 8),
+                              Text('Manage Devices')
+                            ])),
                   ],
                 ),
               ),
@@ -589,7 +615,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     );
   }
 
-  // [UPDATED] Cleaner UI, Smaller Logo, Password Field
   Widget _buildInfoTab({required bool isMobile}) {
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -597,13 +622,9 @@ class _EditClientDialogState extends State<EditClientDialog>
         key: _infoFormKey,
         child: Column(
           children: [
-            // 1. Sleek Logo Picker
             Center(child: _buildLogoPicker()),
             const SizedBox(height: 32),
-
-            // 2. Info Fields
             if (!isMobile) ...[
-              // Desktop: Row for Name and Email
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -612,7 +633,8 @@ class _EditClientDialogState extends State<EditClientDialog>
                       controller: _companyNameController,
                       label: 'Company Name *',
                       icon: Iconsax.building_4,
-                      validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
+                      validator: (v) =>
+                      (v == null || v.isEmpty) ? 'Required' : null,
                     ),
                   ),
                   const SizedBox(width: 16),
@@ -622,13 +644,14 @@ class _EditClientDialogState extends State<EditClientDialog>
                       label: 'Contact Email *',
                       icon: Iconsax.sms,
                       keyboardType: TextInputType.emailAddress,
-                      validator: (v) => (v == null || !v.contains('@')) ? 'Invalid email' : null,
+                      validator: (v) => (v == null || !v.contains('@'))
+                          ? 'Invalid email'
+                          : null,
                     ),
                   )
                 ],
               )
             ] else ...[
-              // Mobile: Stacked
               _buildTextFormField(
                 controller: _companyNameController,
                 label: 'Company Name *',
@@ -641,37 +664,36 @@ class _EditClientDialogState extends State<EditClientDialog>
                 label: 'Contact Email *',
                 icon: Iconsax.sms,
                 keyboardType: TextInputType.emailAddress,
-                validator: (v) => (v == null || !v.contains('@')) ? 'Invalid email' : null,
+                validator: (v) =>
+                (v == null || !v.contains('@')) ? 'Invalid email' : null,
               ),
             ],
-
             const SizedBox(height: 16),
-
             _buildTextFormField(
               controller: _addressController,
               label: 'Company Address',
               icon: Iconsax.location,
               maxLines: 2,
             ),
-
             const SizedBox(height: 16),
-
-            // [NEW] Password Display Field
             _buildPasswordDisplayField(),
-
             const SizedBox(height: 32),
-
             ElevatedButton.icon(
               onPressed: _isInfoLoading ? null : _handleUpdateInfo,
               icon: _isInfoLoading
-                  ? Container(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? Container(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: Colors.white))
                   : Icon(Iconsax.save_2, size: 18),
               label: Text('Save Changes'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppTheme.primaryBlue,
                 foregroundColor: Colors.white,
                 minimumSize: const Size(double.infinity, 52),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(12)),
               ),
             ),
           ],
@@ -680,20 +702,22 @@ class _EditClientDialogState extends State<EditClientDialog>
     );
   }
 
-  // [NEW] Widget for Password Display
   Widget _buildPasswordDisplayField() {
     return TextFormField(
       controller: _passwordDisplayController,
-      readOnly: true, // User cannot edit this directly
+      readOnly: true,
       style: const TextStyle(
-          color: AppTheme.darkText, fontWeight: FontWeight.w600, fontFamily: 'monospace'),
+          color: AppTheme.darkText,
+          fontWeight: FontWeight.w600,
+          fontFamily: 'monospace'),
       decoration: InputDecoration(
         labelText: 'Current Password',
         labelStyle: TextStyle(color: AppTheme.bodyText.withOpacity(0.8)),
         prefixIcon: Icon(Iconsax.key, color: AppTheme.accentYellow, size: 20),
         filled: true,
-        fillColor: AppTheme.accentYellow.withOpacity(0.1), // Distinct color
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+        fillColor: AppTheme.accentYellow.withOpacity(0.1),
+        contentPadding:
+        const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: AppTheme.accentYellow.withOpacity(0.3)),
@@ -706,7 +730,6 @@ class _EditClientDialogState extends State<EditClientDialog>
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: AppTheme.accentYellow, width: 2),
         ),
-        // Copy Button
         suffixIcon: IconButton(
           icon: Icon(Iconsax.copy, color: AppTheme.bodyText, size: 20),
           tooltip: "Copy Password",
@@ -721,10 +744,8 @@ class _EditClientDialogState extends State<EditClientDialog>
     );
   }
 
-  // [UPDATED] Compact Logo Picker
   Widget _buildLogoPicker() {
     final double size = 110;
-
     ImageProvider? imageProvider;
     if (_logoBytes != null) {
       imageProvider = MemoryImage(_logoBytes!);
@@ -744,7 +765,7 @@ class _EditClientDialogState extends State<EditClientDialog>
             height: size,
             decoration: BoxDecoration(
               color: AppTheme.lightGrey,
-              shape: BoxShape.rectangle, // Keep rectangle for company logos
+              shape: BoxShape.rectangle,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: AppTheme.borderGrey, width: 2),
               boxShadow: [
@@ -754,19 +775,20 @@ class _EditClientDialogState extends State<EditClientDialog>
                   offset: Offset(0, 4),
                 )
               ],
-              image: imageProvider != null ? DecorationImage(
+              image: imageProvider != null
+                  ? DecorationImage(
                 image: imageProvider,
-                fit: BoxFit.contain, // Maintain aspect ratio for logos
-              ) : null,
+                fit: BoxFit.contain,
+              )
+                  : null,
             ),
             child: _isUploadingLogo
                 ? Center(child: CircularProgressIndicator(strokeWidth: 2))
                 : (imageProvider == null
-                ? Icon(Iconsax.gallery_add, size: 32, color: AppTheme.bodyText.withOpacity(0.5))
+                ? Icon(Iconsax.gallery_add,
+                size: 32, color: AppTheme.bodyText.withOpacity(0.5))
                 : null),
           ),
-
-          // Edit Badge
           Container(
             width: 32,
             height: 32,
@@ -783,7 +805,6 @@ class _EditClientDialogState extends State<EditClientDialog>
     );
   }
 
-  // Helper text field builder
   Widget _buildTextFormField({
     required TextEditingController controller,
     required String label,
@@ -823,158 +844,124 @@ class _EditClientDialogState extends State<EditClientDialog>
     );
   }
 
-  // ... [Keep devices tab and snackbars unchanged] ...
   Widget _buildDevicesTab() {
     if (_isDeviceLoading) {
-      return const Center(child: CircularProgressIndicator());
+      return const Center(child: CircularProgressIndicator()); //
     }
 
-    final bool isMobile = MediaQuery.of(context).size.width < 900;
+    final bool isMobile = MediaQuery.of(context).size.width < 900; //
 
-    Widget infoBanner = Container(
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: AppTheme.accentYellow.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: AppTheme.accentYellow.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          Icon(Iconsax.info_circle, size: 20, color: AppTheme.accentYellow),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              "Drag Channels to Devices or use the Magic Wand (Auto-Fill) to sequentially assign available channels.",
-              style: TextStyle(
-                color: Colors.brown.shade700,
-                fontWeight: FontWeight.w600,
-                fontSize: 13,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+    // Filter Logic: Matches search query against Name or Device ID
+    final filteredIndices = List.generate(_addedDevices.length, (index) => index).where((index) {
+      final device = _addedDevices[index]; //
+      final deviceId = _deviceRecNoMap[index]?.toString() ?? ""; //
+      final matchesName = device.name.toLowerCase().contains(_deviceSearchQuery); //
+      final matchesId = deviceId.contains(_deviceSearchQuery); //
+      return matchesName || matchesId; //
+    }).toList();
 
-    Widget availableChannelsPanel = Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-          color: AppTheme.lightGrey.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: AppTheme.borderGrey)),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Available Channels (${_allChannels.length})',
-              style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 12),
-          if (_allChannels.isEmpty)
-            const Center(child: Text('No channels available.')),
-          Expanded(
-            child: SingleChildScrollView(
-              child: Wrap(
-                spacing: 8.0,
-                runSpacing: 8.0,
-                children: _allChannels
-                    .map((channel) => _buildDraggableChannel(channel))
-                    .toList(),
-              ),
-            ),
+    Widget searchBar = Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: TextField(
+        controller: _deviceSearchController,
+        decoration: InputDecoration(
+          hintText: 'Search Device ID or Name...', //
+          prefixIcon: Icon(Iconsax.search_normal_1, size: 18, color: AppTheme.primaryBlue), //
+          suffixIcon: _deviceSearchQuery.isNotEmpty
+              ? IconButton(
+            icon: Icon(Iconsax.close_circle, size: 18, color: AppTheme.bodyText),
+            onPressed: () => _deviceSearchController.clear(), // Clears the search
+          )
+              : null,
+          filled: true,
+          fillColor: AppTheme.lightGrey.withOpacity(0.5), //
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(12),
+            borderSide: BorderSide.none,
           ),
-        ],
+          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+        ),
       ),
     );
 
     Widget assignedDevicesPanel = Column(
       children: [
         ElevatedButton.icon(
-          onPressed: _showDeviceFormDialog,
-          icon: const Icon(Iconsax.add),
-          label: const Text('Add New Device'),
+          onPressed: _showDeviceFormDialog, //
+          icon: const Icon(Iconsax.add), //
+          label: const Text('Add New Device'), //
           style: ElevatedButton.styleFrom(
-            minimumSize: const Size(double.infinity, 52),
-            shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            minimumSize: const Size(double.infinity, 52), //
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), //
           ),
         ),
-        const SizedBox(height: 24),
-        Text('Assigned Devices (${_addedDevices.length})',
-            style: Theme.of(context).textTheme.titleMedium),
         const SizedBox(height: 16),
-        if (_addedDevices.isEmpty)
-          Center(
-              child: Text('Add a device to begin.',
-                  style: TextStyle(color: AppTheme.bodyText))),
+        searchBar, // The new search bar widget
+        Text('Assigned Devices (${filteredIndices.length})',
+            style: Theme.of(context).textTheme.titleMedium), //
+        const SizedBox(height: 16),
+        if (filteredIndices.isEmpty)
+          Padding(
+            padding: const EdgeInsets.only(top: 20),
+            child: Text('No devices found matching your search.',
+                style: TextStyle(color: AppTheme.bodyText)), //
+          ),
         Expanded(
           child: ListView.builder(
-            itemCount: _addedDevices.length,
-            itemBuilder: (context, deviceIndex) {
-              final device = _addedDevices[deviceIndex];
-              return _buildDeviceCard(device, deviceIndex, isMobile);
+            itemCount: filteredIndices.length, //
+            itemBuilder: (context, i) {
+              final actualIndex = filteredIndices[i]; // Map filtered index back to original
+              return _buildDeviceCard(_addedDevices[actualIndex], actualIndex, isMobile); //
             },
           ),
         ),
       ],
     );
 
+    // Return layout based on screen size
     if (isMobile) {
-      return SingleChildScrollView(
-        padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 16.0),
-        child: Column(
-          children: [
-            infoBanner,
-            Column(
-              children: [
-                ElevatedButton.icon(
-                  onPressed: _showDeviceFormDialog,
-                  icon: const Icon(Iconsax.add),
-                  label: const Text('Add New Device'),
-                  style: ElevatedButton.styleFrom(
-                    minimumSize: const Size(double.infinity, 52),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Text('Assigned Devices (${_addedDevices.length})',
-                    style: Theme.of(context).textTheme.titleMedium),
-                const SizedBox(height: 16),
-                ListView.builder(
-                  shrinkWrap: true,
-                  physics: NeverScrollableScrollPhysics(),
-                  itemCount: _addedDevices.length,
-                  itemBuilder: (context, deviceIndex) {
-                    final device = _addedDevices[deviceIndex];
-                    return _buildDeviceCard(device, deviceIndex, isMobile);
-                  },
-                ),
-              ],
-            )
-          ],
-        ),
+      return Padding(
+        padding: const EdgeInsets.all(16.0),
+        child: assignedDevicesPanel, //
       );
     }
 
     return Padding(
       padding: const EdgeInsets.all(16.0),
-      child: Column(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          infoBanner,
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(
-                  flex: 2,
-                  child: availableChannelsPanel,
-                ),
-                const SizedBox(width: 24),
-                Expanded(
-                  flex: 3,
-                  child: assignedDevicesPanel,
-                ),
-              ],
+            flex: 2,
+            child: Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                  color: AppTheme.lightGrey.withOpacity(0.5),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: AppTheme.borderGrey)),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Available Channels (${_allChannels.length})',
+                      style: Theme.of(context).textTheme.titleMedium), //
+                  const SizedBox(height: 12),
+                  Expanded(
+                    child: SingleChildScrollView(
+                      child: Wrap(
+                        spacing: 8.0,
+                        runSpacing: 8.0,
+                        children: _allChannels.map((channel) => _buildDraggableChannel(channel)).toList(), //
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
+          ),
+          const SizedBox(width: 24),
+          Expanded(
+            flex: 3,
+            child: assignedDevicesPanel, //
           ),
         ],
       ),
@@ -1030,7 +1017,9 @@ class _EditClientDialogState extends State<EditClientDialog>
           children: [
             Icon(Iconsax.radar_2, size: 16, color: Colors.white),
             const SizedBox(width: 8),
-            Text(displayLabel, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            Text(displayLabel,
+                style: const TextStyle(
+                    color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ).animate().scaleXY(begin: 1.0, end: 1.1),
@@ -1057,12 +1046,18 @@ class _EditClientDialogState extends State<EditClientDialog>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(isAssignedAnywhere ? Iconsax.lock : Iconsax.radar_2, size: 14, color: textColor),
+            Icon(isAssignedAnywhere ? Iconsax.lock : Iconsax.radar_2,
+                size: 14, color: textColor),
             const SizedBox(width: 8),
             Flexible(
               child: Text(
                 displayLabel,
-                style: TextStyle(fontWeight: isAssignedAnywhere ? FontWeight.normal : FontWeight.bold, color: textColor, fontSize: 12),
+                style: TextStyle(
+                    fontWeight: isAssignedAnywhere
+                        ? FontWeight.normal
+                        : FontWeight.bold,
+                    color: textColor,
+                    fontSize: 12),
                 overflow: TextOverflow.ellipsis,
               ),
             ),
@@ -1074,6 +1069,9 @@ class _EditClientDialogState extends State<EditClientDialog>
 
   Widget _buildDeviceCard(DeviceData device, int deviceIndex, bool isMobile) {
     final List<int?> selectedChannels = _selectedChannelsMap[deviceIndex] ?? [];
+
+    // [UPDATE] Fetch the device ID using the map
+    final int? deviceId = _deviceRecNoMap[deviceIndex];
 
     return Card(
       elevation: 0,
@@ -1091,20 +1089,26 @@ class _EditClientDialogState extends State<EditClientDialog>
             ),
             title: Text(device.name,
                 style: TextStyle(fontWeight: FontWeight.bold)),
-            subtitle: Text(
-                'Serial: ${device.serial}  •  Channels: ${device.channelCount}'),
-            trailing: Row(
+            // [UPDATE] Display Device ID in the subtitle
+            subtitle:Text(
+            'Device ID: ${deviceId ?? "N/A"}\nChannels: ${device.channelCount}',
+    style: TextStyle(height: 1.5), // optional spacing
+    ),
+
+    trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Tooltip(
                   message: 'Auto-fill Channels',
                   child: IconButton(
-                    icon: Icon(Iconsax.magic_star, color: AppTheme.primaryBlue, size: 20),
+                    icon: Icon(Iconsax.magic_star,
+                        color: AppTheme.primaryBlue, size: 20),
                     onPressed: () => _showAutoFillDialog(deviceIndex),
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Iconsax.trash, color: AppTheme.accentRed, size: 20),
+                  icon:
+                  Icon(Iconsax.trash, color: AppTheme.accentRed, size: 20),
                   onPressed: () => _handleDeleteDevice(deviceIndex),
                 ),
               ],
@@ -1152,9 +1156,13 @@ class _EditClientDialogState extends State<EditClientDialog>
             margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
             decoration: BoxDecoration(
-              color: isHovering ? AppTheme.accentRed.withOpacity(0.1) : AppTheme.accentGreen.withOpacity(0.1),
+              color: isHovering
+                  ? AppTheme.accentRed.withOpacity(0.1)
+                  : AppTheme.accentGreen.withOpacity(0.1),
               borderRadius: BorderRadius.circular(10),
-              border: isHovering ? Border.all(color: AppTheme.accentRed) : Border.all(color: Colors.transparent),
+              border: isHovering
+                  ? Border.all(color: AppTheme.accentRed)
+                  : Border.all(color: Colors.transparent),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1162,16 +1170,26 @@ class _EditClientDialogState extends State<EditClientDialog>
                 Expanded(
                   child: Row(
                     children: [
-                      Text('Ch. ${channelIndex + 1}: ', style: TextStyle(color: AppTheme.bodyText, fontWeight: FontWeight.bold)),
+                      Text('Ch. ${channelIndex + 1}: ',
+                          style: TextStyle(
+                              color: AppTheme.bodyText,
+                              fontWeight: FontWeight.bold)),
                       Expanded(
-                        child: Text(displayLabel, style: TextStyle(color: AppTheme.accentGreen, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
+                        child: Text(displayLabel,
+                            style: TextStyle(
+                                color: AppTheme.accentGreen,
+                                fontWeight: FontWeight.bold),
+                            overflow: TextOverflow.ellipsis),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
-                  icon: Icon(Iconsax.close_circle, size: 20, color: AppTheme.accentRed),
-                  onPressed: () { _handleChannelChange(deviceIndex, channelIndex, null); },
+                  icon: Icon(Iconsax.close_circle,
+                      size: 20, color: AppTheme.accentRed),
+                  onPressed: () {
+                    _handleChannelChange(deviceIndex, channelIndex, null);
+                  },
                 )
               ],
             ),
@@ -1183,19 +1201,31 @@ class _EditClientDialogState extends State<EditClientDialog>
           child: Container(
             height: 50,
             decoration: BoxDecoration(
-              color: isHovering ? AppTheme.primaryBlue.withOpacity(0.1) : Colors.transparent,
+              color: isHovering
+                  ? AppTheme.primaryBlue.withOpacity(0.1)
+                  : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: isHovering ? AppTheme.primaryBlue : AppTheme.borderGrey, width: isHovering ? 2 : 1),
+              border: Border.all(
+                  color: isHovering ? AppTheme.primaryBlue : AppTheme.borderGrey,
+                  width: isHovering ? 2 : 1),
             ),
             child: Center(
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  if (isHovering) Icon(Iconsax.add, color: AppTheme.primaryBlue, size: 16),
+                  if (isHovering)
+                    Icon(Iconsax.add, color: AppTheme.primaryBlue, size: 16),
                   if (isHovering) SizedBox(width: 8),
                   Text(
-                    isHovering ? 'Drop to Assign' : 'Assign to Channel ${channelIndex + 1}',
-                    style: TextStyle(color: isHovering ? AppTheme.primaryBlue : AppTheme.bodyText, fontWeight: isHovering ? FontWeight.bold : FontWeight.normal),
+                    isHovering
+                        ? 'Drop to Assign'
+                        : 'Assign to Channel ${channelIndex + 1}',
+                    style: TextStyle(
+                        color: isHovering
+                            ? AppTheme.primaryBlue
+                            : AppTheme.bodyText,
+                        fontWeight:
+                        isHovering ? FontWeight.bold : FontWeight.normal),
                   ),
                 ],
               ),
@@ -1213,7 +1243,10 @@ class _EditClientDialogState extends State<EditClientDialog>
       int deviceIndex, int channelIndex, List<int?> selectedChannels) {
     final int? currentSelection = selectedChannels[channelIndex];
     List<DropdownMenuItem<int>> items = [];
-    items.add(DropdownMenuItem<int>(value: null, child: Text('--- Not Assigned ---', style: TextStyle(color: AppTheme.bodyText))));
+    items.add(DropdownMenuItem<int>(
+        value: null,
+        child: Text('--- Not Assigned ---',
+            style: TextStyle(color: AppTheme.bodyText))));
     items.addAll(_allChannels.map((channel) {
       final String label = channel['ChannelID'] != null
           ? "${channel['ChannelID']} - ${channel['ChannelName']}"
@@ -1270,11 +1303,13 @@ class _EditClientDialogState extends State<EditClientDialog>
 
   void _showSuccessSnackbar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: AppTheme.accentGreen));
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(message), backgroundColor: AppTheme.accentGreen));
   }
 
   void _showErrorSnackbar(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message), backgroundColor: AppTheme.accentRed));
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(message), backgroundColor: AppTheme.accentRed));
   }
 }

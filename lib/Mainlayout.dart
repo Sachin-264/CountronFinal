@@ -5,6 +5,7 @@ import 'package:countron_app/provider/admin_provider.dart';
 import 'package:countron_app/provider/client_provider.dart';
 import 'package:countron_app/provider/session_manager.dart'; // 🆕 IMPORTED
 import 'package:countron_app/widgets/add_channel.dart';
+import 'package:countron_app/widgets/add_client_dialog.dart';
 import 'package:countron_app/widgets/successscreen.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -253,7 +254,7 @@ class _MainLayoutState extends State<MainLayout> {
     );
   }
 
-  // "Add Client" / "Add Channel" options
+// [REPLACE] _buildFabOptions function in _MainLayoutState
   Widget _buildFabOptions(BuildContext context) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -279,7 +280,11 @@ class _MainLayoutState extends State<MainLayout> {
           isExpanded: _isFabExpanded,
           delay: 50.ms,
           onTap: () {
-            print('Add Client Tapped');
+            // ✅ FIX: Now opening the actual AddClientScreen dialog
+            showDialog(
+              context: context,
+              builder: (context) => const AddClientScreen(),
+            );
             setState(() => _isFabExpanded = false);
           },
         ),
@@ -542,10 +547,6 @@ class _MobileHeaderContent extends StatelessWidget {
         const Spacer(),
         Row(
           children: [
-            _HeaderNotificationButton(
-              onPressed: () {},
-              hasBadge: true,
-            ),
             const SizedBox(width: 12),
             _MobileProfileAvatar(
               userInitial: userInitial,
@@ -611,6 +612,7 @@ class _DesktopHeaderContent extends StatelessWidget {
     required this.title,
   });
 
+// [REPLACE] Inside _DesktopHeaderContent build method
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -624,7 +626,6 @@ class _DesktopHeaderContent extends StatelessWidget {
             children: [
               Text(
                 title,
-                // [MODIFIED] Using theme.headlineMedium for Bebas Neue
                 style: theme.textTheme.headlineMedium?.copyWith(
                   color: AppTheme.primaryBlue,
                 ),
@@ -645,11 +646,7 @@ class _DesktopHeaderContent extends StatelessWidget {
           const SizedBox(width: 28),
           Row(
             children: [
-              _HeaderNotificationButton(
-                onPressed: () {},
-                hasBadge: true,
-              ),
-              const SizedBox(width: 16),
+              // 🛑 Notification button removed from here
               _HeaderUserCard(
                 userName: userName,
                 userInitial: userInitial,

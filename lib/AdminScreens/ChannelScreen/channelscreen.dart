@@ -1,5 +1,4 @@
 // [UPDATE] lib/screens/channelscreen.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -12,6 +11,7 @@ import '../../AdminService/channel_api_service.dart';
 import '../../AdminService/input_type_api_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/add_channel.dart';
+import '../../widgets/color_utils.dart';
 import '../../widgets/orbit_loader.dart';
 import '../../widgets/successscreen.dart';
 
@@ -128,11 +128,21 @@ class _ChannelScreenState extends State<ChannelScreen> with TickerProviderStateM
   }
 
   void _addChannel() {
+    // 1. Gather all colors currently used by existing channels
+    final List<String> usedColors = _channels
+        .map((c) => c['GraphLineColour']?.toString().toUpperCase() ?? '')
+        .toList();
+
+    // 2. Get the next best unique color from our 64-color palette
+    final Color suggestedColor = ColorUtils.getNextUniqueColor(usedColors);
+
     showDialog(
       context: context,
       barrierDismissible: true,
       builder: (BuildContext context) {
         return AddChannelDialog(
+          // Pass the unique color to the Add dialog
+          initialColor: suggestedColor,
           onSave: (String newChannelName) {
             Navigator.pop(context);
             _loadChannels();
@@ -812,7 +822,7 @@ class _ChannelScreenState extends State<ChannelScreen> with TickerProviderStateM
                           ],
                         ),
                         const Divider(height: 32),
-                        _buildColorRow('Alarm Indicator Color', channel['TargetAlarmColour']),
+                        _buildColorRow('Alarm Color', channel['TargetAlarmColour']),
                       ],
                     ),
                   ),
@@ -827,7 +837,7 @@ class _ChannelScreenState extends State<ChannelScreen> with TickerProviderStateM
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(color: AppTheme.accentGreen.withOpacity(0.2)),
                     ),
-                    child: _buildColorRow('Graph Line Color', channel['GraphLineColour']),
+                    child: _buildColorRow('Graph Color', channel['GraphLineColour']),
                   ),
 
 

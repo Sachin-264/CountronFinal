@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import '../Mainlayout.dart';
 import '../provider/session_manager.dart';
-import '../routes/app_routes.dart'; // Import Routes
+import '../routes/app_routes.dart';
 
 // Screens
 import 'ChannelScreen/channelscreen.dart';
@@ -17,43 +17,46 @@ class AdminShell extends StatefulWidget {
 }
 
 class _AdminShellState extends State<AdminShell> {
-  AppScreen _activeScreen = AppScreen.dashboard; // Default
+  AppScreen _activeScreen = AppScreen.dashboard;
 
   @override
   void initState() {
     super.initState();
-    _restoreActiveTab(); // 2. Restore tab on load
+    _restoreActiveTab();
   }
 
-  // 📌 LOGIC: Restore the screen from Session Storage
-  void _restoreActiveTab() {
-    final savedTab = SessionManager.getSavedTab();
+  // 📌 UPDATED: Added async/await
+  Future<void> _restoreActiveTab() async {
+    final savedTab = await SessionManager.getSavedTab(); // Await the Future
     if (savedTab.isNotEmpty) {
       try {
-        // Convert string (e.g. "settings") back to Enum (AppScreen.settings)
         final screen = AppScreen.values.firstWhere(
               (e) => e.toString().split('.').last == savedTab,
           orElse: () => AppScreen.dashboard,
         );
-        setState(() => _activeScreen = screen);
+        if (mounted) {
+          setState(() => _activeScreen = screen);
+        }
       } catch (e) {
         debugPrint("Error restoring tab: $e");
       }
     }
   }
 
-  // 📌 LOGIC: Save the screen when clicked
-  void _onScreenSelected(AppScreen screen) {
+  // 📌 UPDATED: Added async/await
+  Future<void> _onScreenSelected(AppScreen screen) async {
     setState(() {
       _activeScreen = screen;
     });
-    // Save "dashboard", "clients", etc.
-    SessionManager.saveCurrentTab(screen.toString().split('.').last);
+    await SessionManager.saveCurrentTab(screen.toString().split('.').last);
   }
 
-  void _performLogout() {
-    SessionManager.clearSession();
-    Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+  // 📌 UPDATED: Added async/await
+  Future<void> _performLogout() async {
+    await SessionManager.clearSession();
+    if (mounted) {
+      Navigator.pushNamedAndRemoveUntil(context, AppRoutes.login, (route) => false);
+    }
   }
 
   Widget _buildScreen() {

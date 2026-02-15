@@ -10,7 +10,13 @@ import '../theme/app_theme.dart';
 
 class AddChannelDialog extends StatefulWidget {
   final Function(String channelName) onSave;
-  const AddChannelDialog({super.key, required this.onSave});
+  final Color? initialColor; // Receive unique color from ChannelScreen
+
+  const AddChannelDialog({
+    super.key,
+    required this.onSave,
+    this.initialColor,
+  });
 
   @override
   State<AddChannelDialog> createState() => _AddChannelDialogState();
@@ -29,7 +35,7 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
   bool get _isLinear => _selectedInputTypeID == 5;
 
   // Controllers
-  final _channelIdController = TextEditingController(); // --- NEW
+  final _channelIdController = TextEditingController();
   final _nameController = TextEditingController();
   final _unitController = TextEditingController();
 
@@ -40,34 +46,33 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
   final _highValueController = TextEditingController(text: '9999.0');
   final _offsetController = TextEditingController(text: '0.0');
 
-  String? _suggestedId; // --- NEW: To store the API suggestion
+  String? _suggestedId;
 
   Color _alarmColor = AppTheme.accentRed;
-  Color _lineColor = AppTheme.primaryBlue;
+  late Color _lineColor; // Initialized in initState
 
   @override
   void initState() {
     super.initState();
+    // Initialize with the unique color passed from parent or fallback to primary
+    _lineColor = widget.initialColor ?? AppTheme.primaryBlue;
     _loadInputTypes();
-    _fetchSuggestedId(); // --- NEW: Fetch ID on load
+    _fetchSuggestedId();
   }
 
-  // --- NEW: Fetch Suggested ID ---
   Future<void> _fetchSuggestedId() async {
     try {
       final id = await _apiService.generateChannelId();
       if (mounted) {
         setState(() {
           _suggestedId = id;
-          _channelIdController.text = id; // Pre-fill
+          _channelIdController.text = id;
         });
       }
     } catch (e) {
-      // Handle error gently (user can still type manually)
       debugPrint("Error fetching ID: $e");
     }
   }
-  // -------------------------------
 
   Future<void> _loadInputTypes() async {
     try {
@@ -83,10 +88,9 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
         )['InputTypeID'] as int?;
       });
     } catch (e) {
-      // Handle error silently or log it
+      debugPrint("Error loading input types: $e");
     }
   }
-
 
   @override
   void dispose() {
@@ -109,7 +113,7 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
   Future<void> _saveChannel() async {
     if (!_formKey.currentState!.validate() || _selectedInputTypeID == null) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Please select an Input Type and fix the errors.'),
+        content: const Text('Please select an Input Type and fix the errors.'),
         backgroundColor: AppTheme.accentRed,
         behavior: SnackBarBehavior.floating,
       ));
@@ -120,7 +124,7 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
 
     try {
       await _apiService.createChannel(
-        channelID: _channelIdController.text, // --- NEW: Pass the ID
+        channelID: _channelIdController.text,
         channelName: _nameController.text,
         startingCharacter: '',
         dataLength: 8,
@@ -162,10 +166,7 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       backgroundColor: AppTheme.background,
       surfaceTintColor: AppTheme.background,
-      title: null,
-      actions: null,
       contentPadding: EdgeInsets.zero,
-
       content: SizedBox(
         width: MediaQuery.of(context).size.width * (isMobile ? 0.95 : 0.4),
         child: Column(
@@ -183,13 +184,10 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Icon(Iconsax.add, color: AppTheme.primaryBlue, size: 28),
+                  const Icon(Iconsax.add, color: AppTheme.primaryBlue, size: 28),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      'ADD NEW CHANNEL',
-                      style: theme.textTheme.titleLarge,
-                    ),
+                    child: Text('ADD NEW CHANNEL', style: theme.textTheme.titleLarge),
                   ),
                   MouseRegion(
                     onEnter: (_) => setState(() => _isCloseButtonHovered = true),
@@ -201,61 +199,49 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                         icon: const Icon(Iconsax.close_circle),
                         color: AppTheme.bodyText.withOpacity(0.7),
                         onPressed: () => Navigator.pop(context),
-                        tooltip: 'Close',
                       ),
                     ),
                   ),
                 ],
               ),
             ),
-            Divider(height: 1, color: AppTheme.borderGrey),
-
+            const Divider(height: 1, color: AppTheme.borderGrey),
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.all(24),
                 child: Form(
                   key: _formKey,
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      // --- NEW: Channel ID Field with Disclaimer ---
                       _buildTextFormField(
                         controller: _channelIdController,
                         label: 'Channel ID *',
                         icon: Iconsax.tag,
-                        validator: (v) => (v == null || v.isEmpty) ? 'Channel ID is required' : null,
+                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                       ),
                       if (_suggestedId != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 8.0, left: 4.0),
+                          padding: const EdgeInsets.only(top: 8, bottom: 8),
                           child: Row(
                             children: [
-                              Icon(Iconsax.info_circle, size: 14, color: AppTheme.primaryBlue),
+                              const Icon(Iconsax.info_circle, size: 14, color: AppTheme.primaryBlue),
                               const SizedBox(width: 6),
                               Expanded(
                                 child: Text(
-                                  'System suggested ID: $_suggestedId. Please use this sequence.',
-                                  style: TextStyle(
-                                    fontSize: 12,
-                                    color: AppTheme.bodyText.withOpacity(0.8),
-                                    fontStyle: FontStyle.italic,
-                                  ),
+                                  'System suggested ID: $_suggestedId',
+                                  style: TextStyle(fontSize: 12, color: AppTheme.bodyText.withOpacity(0.8), fontStyle: FontStyle.italic),
                                 ),
                               ),
                             ],
                           ),
                         ),
                       const SizedBox(height: 16),
-                      // ---------------------------------------------
-
                       _buildInputTypeDropdown(),
                       const SizedBox(height: 16),
-
                       _buildTextFormField(
                         controller: _nameController,
                         label: 'Channel Name',
                         icon: Iconsax.radar_2,
-                        validator: null,
                       ),
                       const SizedBox(height: 16),
                       _buildTextFormField(
@@ -273,7 +259,6 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                         inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                       ),
-
                       const SizedBox(height: 16),
                       _buildTextFormField(
                         controller: _offsetController,
@@ -283,22 +268,20 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                         validator: (v) {
                           if (v == null || v.isEmpty) return 'Required';
                           final val = double.tryParse(v);
-                          if (val == null) return 'Invalid number';
-                          if (val < -9999 || val > 9999) return 'Must be between -9999 and +9999';
+                          if (val == null) return 'Invalid';
+                          if (val < -9999 || val > 9999) return 'Range Error';
                           return null;
                         },
                       ),
-
                       if (_isLinear) ...[
-                        Divider(height: 32, color: AppTheme.borderGrey.withOpacity(0.5)),
-                        _buildSectionHeader('Linear Calibration (4-20mA)', Iconsax.setting_4, AppTheme.accentGreen),
+                        const Divider(height: 32),
+                        _buildSectionHeader('Linear Calibration', Iconsax.setting_4, AppTheme.accentGreen),
                         const SizedBox(height: 16),
                         _buildTextFormField(
                           controller: _lowValueController,
                           label: 'Low Value *',
                           icon: Iconsax.arrow_down_1,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                         ),
                         const SizedBox(height: 16),
                         _buildTextFormField(
@@ -306,11 +289,9 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                           label: 'High Value *',
                           icon: Iconsax.arrow_up_3,
                           keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                          validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                         ),
                       ],
-
-                      Divider(height: 32, color: AppTheme.borderGrey.withOpacity(0.5)),
+                      const Divider(height: 32),
                       _buildSectionHeader('Alarm Configuration', Iconsax.notification, AppTheme.accentRed),
                       const SizedBox(height: 16),
                       _buildTextFormField(
@@ -318,7 +299,6 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                         label: 'Low Limit *',
                         icon: Iconsax.arrow_down_1,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 16),
                       _buildTextFormField(
@@ -326,37 +306,29 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
                         label: 'High Limit *',
                         icon: Iconsax.arrow_up_3,
                         keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
-                        validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
                       ),
                       const SizedBox(height: 16),
                       _buildColorPickerInput(
-                          label: 'Alarm Color',
-                          icon: Iconsax.color_swatch,
-                          color: _alarmColor,
-                          onColorChanged: (newColor) {
-                            setState(() => _alarmColor = newColor);
-                          }
+                        label: 'Alarm Color',
+                        icon: Iconsax.color_swatch,
+                        color: _alarmColor,
+                        onColorChanged: (c) => setState(() => _alarmColor = c),
                       ),
-
-                      Divider(height: 32, color: AppTheme.borderGrey.withOpacity(0.5)),
+                      const Divider(height: 32),
                       _buildSectionHeader('Chart Configuration', Iconsax.graph, AppTheme.accentGreen),
                       const SizedBox(height: 16),
                       _buildColorPickerInput(
-                          label: 'Graph Line Color',
-                          icon: Iconsax.colors_square,
-                          color: _lineColor,
-                          onColorChanged: (newColor) {
-                            setState(() => _lineColor = newColor);
-                          }
+                        label: 'Graph Line Color',
+                        icon: Iconsax.colors_square,
+                        color: _lineColor,
+                        onColorChanged: (c) => setState(() => _lineColor = c),
                       ),
-                      const SizedBox(height: 16),
                     ],
                   ),
                 ),
               ),
             ),
-
-            Divider(height: 1, color: AppTheme.borderGrey),
+            const Divider(height: 1),
             Padding(
               padding: const EdgeInsets.all(24),
               child: _buildSaveButton(),
@@ -377,36 +349,20 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
       ),
       child: DropdownButtonFormField<int>(
         value: _selectedInputTypeID,
+        isExpanded: true,
         decoration: InputDecoration(
           labelText: 'Input Type *',
-          labelStyle: TextStyle(color: AppTheme.bodyText.withOpacity(0.8)),
           prefixIcon: Icon(Iconsax.activity, color: AppTheme.primaryBlue, size: 20),
           border: InputBorder.none,
-          isDense: true,
-          contentPadding: const EdgeInsets.only(top: 16, bottom: 16),
         ),
-        hint: const Text('Select Input Type'),
         items: _inputTypeOptions.map((type) {
-          final isLinear = type['InputTypeID'] == 5;
-          final typeName = type['TypeName'] as String;
-          final designation = isLinear ? ' (Linear)' : ' (Non-Linear)';
-
           return DropdownMenuItem<int>(
             value: type['InputTypeID'] as int,
-            child: Text(
-                typeName + designation,
-                style: const TextStyle(color: AppTheme.darkText)
-            ),
+            child: Text("${type['TypeName']} ${type['InputTypeID'] == 5 ? '(Linear)' : '(Non-Linear)'}"),
           );
         }).toList(),
-        onChanged: (int? newValue) {
-          if (newValue != null) {
-            setState(() {
-              _selectedInputTypeID = newValue;
-            });
-          }
-        },
-        validator: (v) => v == null ? 'Input Type is required' : null,
+        onChanged: (val) => setState(() => _selectedInputTypeID = val),
+        validator: (v) => v == null ? 'Required' : null,
       ),
     );
   }
@@ -416,48 +372,10 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
       children: [
         Icon(icon, size: 20, color: color),
         const SizedBox(width: 12),
-        Text(
-          title.toUpperCase(),
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: color,
-            fontWeight: FontWeight.bold,
-            letterSpacing: 1.1,
-          ),
-        ),
+        Text(title.toUpperCase(), style: TextStyle(color: color, fontWeight: FontWeight.bold, letterSpacing: 1.1)),
         const SizedBox(width: 12),
-        Expanded(child: Divider(color: color.withOpacity(0.2), thickness: 1)),
+        Expanded(child: Divider(color: color.withOpacity(0.2))),
       ],
-    );
-  }
-
-  Widget _buildSaveButton() {
-    return ElevatedButton.icon(
-      onPressed: _isLoading ? null : _saveChannel,
-      icon: _isLoading
-          ? Container(
-        width: 20,
-        height: 20,
-        child: CircularProgressIndicator(
-          strokeWidth: 2.5,
-          color: Colors.white,
-        ),
-      )
-          : const Icon(Iconsax.add, size: 20),
-      label: Text(
-        'Create Channel',
-        style: AppTheme.buttonText.copyWith(fontSize: 16),
-      ),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: AppTheme.primaryBlue,
-        foregroundColor: Colors.white,
-        minimumSize: const Size(double.infinity, 52),
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        elevation: 2,
-        shadowColor: AppTheme.primaryBlue.withOpacity(0.3),
-      ),
     );
   }
 
@@ -469,89 +387,36 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
     TextInputType? keyboardType,
     List<TextInputFormatter>? inputFormatters,
   }) {
-    List<TextInputFormatter>? formatters = inputFormatters;
-
-    if (keyboardType != null &&
-        keyboardType == const TextInputType.numberWithOptions(decimal: true, signed: true) &&
-        inputFormatters == null) {
-      formatters = [FilteringTextInputFormatter.allow(RegExp(r'^-?\d*\.?\d*'))];
-    } else if (keyboardType != null &&
-        keyboardType == const TextInputType.numberWithOptions(decimal: true) &&
-        inputFormatters == null) {
-      formatters = [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d*'))];
-    }
-
     return TextFormField(
       controller: controller,
       validator: validator,
       keyboardType: keyboardType,
-      inputFormatters: formatters,
-      style: const TextStyle(color: AppTheme.darkText, fontWeight: FontWeight.w500),
+      inputFormatters: inputFormatters,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: AppTheme.bodyText.withOpacity(0.8)),
         prefixIcon: Icon(icon, color: AppTheme.primaryBlue, size: 20),
         filled: true,
         fillColor: AppTheme.lightGrey.withOpacity(0.5),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.borderGrey.withOpacity(0.5)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: AppTheme.borderGrey.withOpacity(0.5)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 2),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.accentRed, width: 1.5),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: AppTheme.accentRed, width: 2),
-        ),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.borderGrey.withOpacity(0.5))),
+        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: AppTheme.borderGrey.withOpacity(0.5))),
       ),
     );
   }
 
-  Widget _buildColorPickerInput({
-    required String label,
-    required IconData icon,
-    required Color color,
-    required ValueChanged<Color> onColorChanged,
-  }) {
+  Widget _buildColorPickerInput({required String label, required IconData icon, required Color color, required ValueChanged<Color> onColorChanged}) {
     return InkWell(
       onTap: () => _showColorPickerDialog(label, color, onColorChanged),
       borderRadius: BorderRadius.circular(12),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        decoration: BoxDecoration(
-          color: AppTheme.lightGrey.withOpacity(0.5),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: AppTheme.borderGrey.withOpacity(0.5)),
-        ),
+        decoration: BoxDecoration(color: AppTheme.lightGrey.withOpacity(0.5), borderRadius: BorderRadius.circular(12), border: Border.all(color: AppTheme.borderGrey.withOpacity(0.5))),
         child: Row(
           children: [
             Icon(icon, color: AppTheme.primaryBlue, size: 20),
             const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(color: AppTheme.bodyText.withOpacity(0.8), fontSize: 16),
-            ),
+            Text(label, style: TextStyle(color: AppTheme.bodyText.withOpacity(0.8), fontSize: 16)),
             const Spacer(),
-            Container(
-              width: 28,
-              height: 28,
-              decoration: BoxDecoration(
-                color: color,
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: AppTheme.borderGrey),
-              ),
-            ),
+            Container(width: 28, height: 28, decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(8), border: Border.all(color: AppTheme.borderGrey))),
           ],
         ),
       ),
@@ -565,28 +430,26 @@ class _AddChannelDialogState extends State<AddChannelDialog> {
         Color tempColor = currentColor;
         return AlertDialog(
           title: Text('Pick $title'),
-          content: SingleChildScrollView(
-            child: MaterialPicker(
-              pickerColor: currentColor,
-              onColorChanged: (color) => tempColor = color,
-              enableLabel: true,
-            ),
-          ),
+          content: SingleChildScrollView(child: MaterialPicker(pickerColor: currentColor, onColorChanged: (color) => tempColor = color)),
           actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                onColorChanged(tempColor);
-                Navigator.pop(context);
-              },
-              child: const Text('Select'),
-            ),
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+            TextButton(onPressed: () { onColorChanged(tempColor); Navigator.pop(context); }, child: const Text('Select')),
           ],
         );
       },
+    );
+  }
+
+  Widget _buildSaveButton() {
+    return ElevatedButton.icon(
+      onPressed: _isLoading ? null : _saveChannel,
+      icon: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : const Icon(Iconsax.add, size: 20),
+      label: const Text('Create Channel', style: TextStyle(fontSize: 16, color: Colors.white)),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: AppTheme.primaryBlue,
+        minimumSize: const Size(double.infinity, 52),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
     );
   }
 }

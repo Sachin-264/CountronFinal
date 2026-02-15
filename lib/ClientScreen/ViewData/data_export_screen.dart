@@ -1,3 +1,5 @@
+// lib/ClientScreen/ViewData/data_export_screen.dart
+
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:iconsax_flutter/iconsax_flutter.dart';
@@ -6,6 +8,7 @@ import 'package:provider/provider.dart';
 
 import '../../theme/client_theme.dart';
 import '../Download/download.dart';
+import '../Download/downloadScreen.dart';
 import 'channel_data_model.dart';
 import '../../ClinetService/setting_api_service.dart';
 import '../../ClinetService/export_service.dart';
@@ -39,6 +42,8 @@ class _DataExportScreenState extends State<DataExportScreen> {
 
   bool _isLoadingSettings = true;
   bool _isGenerating = false;
+  double _exportProgress = 0.0; // Progress tracker
+  String _progressMessage = ""; // Progress message
   String _pdfOrientation = 'Portrait';
 
   late DateTime _currentStartDate;
@@ -56,6 +61,18 @@ class _DataExportScreenState extends State<DataExportScreen> {
     _currentStartDate = widget.startDate;
     _currentEndDate = widget.endDate;
     _fetchSettings();
+  }
+
+  @override
+  void dispose() {
+    _granularityController.dispose();
+    for (var controller in _headerControllers) {
+      controller.dispose();
+    }
+    for (var controller in _footerControllers) {
+      controller.dispose();
+    }
+    super.dispose();
   }
 
   Future<void> _fetchSettings() async {
@@ -175,14 +192,20 @@ class _DataExportScreenState extends State<DataExportScreen> {
       return;
     }
 
-    setState(() => _isGenerating = true);
+    setState(() {
+      _isGenerating = true;
+      _exportProgress = 0.0;
+      _progressMessage = "Preparing export...";
+    });
+
+    // Give UI time to show the progress dialog
+    await Future.delayed(const Duration(milliseconds: 100));
 
     try {
       int interval = int.tryParse(_granularityController.text) ?? 0;
 
-      // --- [CRITICAL] Time Filtering Logic ---
-      // This logic ensures that even if 'passedData' has extra records,
-      // we ONLY take what is strictly between _currentStartDate and _currentEndDate.
+      // Filtering Logic
+      setState(() => _progressMessage = "Filtering data...");
       final filteredData = widget.passedData.where((point) {
         bool isAfterStart = point.dateTime.isAfter(_currentStartDate) || point.dateTime.isAtSameMomentAs(_currentStartDate);
         bool isBeforeEnd = point.dateTime.isBefore(_currentEndDate) || point.dateTime.isAtSameMomentAs(_currentEndDate);
@@ -193,79 +216,119 @@ class _DataExportScreenState extends State<DataExportScreen> {
         throw Exception("No records found in the selected date range (${DateFormat('HH:mm').format(_currentStartDate)} - ${DateFormat('HH:mm').format(_currentEndDate)}).");
       }
 
+      setState(() => _progressMessage = "Resampling data...");
       List<ChannelDataPoint> processedData = _exportService.resampleData(filteredData, interval);
 
       String startStr = DateFormat('yyyyMMdd_HHmm').format(_currentStartDate);
       String endStr = DateFormat('yyyyMMdd_HHmm').format(_currentEndDate);
       String fileName = "Report_${startStr}_to_$endStr";
 
-      Map<String, dynamic> branding = {
-        'name': _deviceSettings?['ClientCompanyName'] ?? '',
-        'address': _deviceSettings?['ClientAddress'] ?? '',
-        'logoPath': _deviceSettings?['Logo'] ?? '',
-        'orientation': _pdfOrientation,
+      final branding = {
+        'name': _deviceSettings?['ClientCompanyName'] ?? 'Company Name',
+        'address': _deviceSettings?['ClientAddress'] ?? 'Address',
+        'logoPath': _deviceSettings?['Logo'] ?? ''
       };
 
-      List<String> headers = _headerControllers.map((c) => c.text).where((t) => t.isNotEmpty).toList();
-      List<String> footers = _footerControllers.map((c) => c.text).where((t) => t.isNotEmpty).toList();
+      String reportDuration = "Report Duration: ${DateFormat('yyyy-MM-dd HH:mm').format(_currentStartDate)} to ${DateFormat('yyyy-MM-dd HH:mm').format(_currentEndDate)}";
+      String dataGranularity = interval == 0 ? "Data Granularity: Raw Data" : "Data Granularity: ${interval} min average";
 
-      String durationStr = "Period: ${DateFormat('yyyy-MM-dd HH:mm').format(_currentStartDate)} to ${DateFormat('yyyy-MM-dd HH:mm').format(_currentEndDate)}";
-      String granularityStr = "Granularity: ${interval == 0 ? 'Raw Data' : '$interval Minute(s) Average'}";
+      List<String> headerLines = _headerControllers.map((c) => c.text).where((line) => line.isNotEmpty).toList();
+      List<String> footerLines = _footerControllers.map((c) => c.text).where((line) => line.isNotEmpty).toList();
 
+      // Generate based on format
       if (format == 'pdf') {
+        setState(() => _progressMessage = "Generating PDF...");
         await _exportService.generateAndSavePdf(
           data: processedData,
           channels: widget.passedChannels,
           branding: branding,
-          headerLines: headers,
-          footerLines: footers,
+          headerLines: headerLines,
+          footerLines: footerLines,
           fileName: fileName,
-          reportDuration: durationStr,
-          dataGranularity: granularityStr,
+          reportDuration: reportDuration,
+          dataGranularity: dataGranularity,
           graphImage: widget.graphImage,
           orientation: _pdfOrientation,
+          onProgress: (progress) {
+            if (mounted) {
+              setState(() {
+                _exportProgress = progress;
+                if (progress < 0.2) {
+                  _progressMessage = "Loading resources...";
+                } else if (progress < 0.5) {
+                  _progressMessage = "Building document...";
+                } else if (progress < 0.85) {
+                  _progressMessage = "Processing data...";
+                } else if (progress < 0.95) {
+                  _progressMessage = "Saving file...";
+                } else {
+                  _progressMessage = "Finalizing...";
+                }
+              });
+            }
+          },
         );
       } else if (format == 'excel') {
+        setState(() => _progressMessage = "Generating Excel...");
         await _exportService.generateAndSaveExcel(
           data: processedData,
           channels: widget.passedChannels,
           branding: branding,
+          headerLines: headerLines,
           fileName: fileName,
-          reportDuration: durationStr,
-          dataGranularity: granularityStr,
+          reportDuration: reportDuration,
+          dataGranularity: dataGranularity,
           graphImage: widget.graphImage,
         );
       } else if (format == 'csv') {
+        setState(() => _progressMessage = "Generating CSV...");
         await _exportService.generateAndSaveCSV(
           data: processedData,
           channels: widget.passedChannels,
           fileName: fileName,
-          reportDuration: durationStr,
-          dataGranularity: granularityStr,
+          reportDuration: reportDuration,
+          dataGranularity: dataGranularity,
         );
       } else if (format == 'doc') {
+        setState(() => _progressMessage = "Generating Word document...");
         await _exportService.generateAndSaveDOC(
           data: processedData,
+          headerLines: headerLines,
+          footerLines: footerLines,
           channels: widget.passedChannels,
           branding: branding,
           fileName: fileName,
-          reportDuration: durationStr,
-          dataGranularity: granularityStr,
+          reportDuration: reportDuration,
+          dataGranularity: dataGranularity,
           graphImage: widget.graphImage,
         );
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Export Successful! Check Downloads.")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("$format generated successfully!"),
+            backgroundColor: Colors.green,
+          ),
+        );
       }
-
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Export Failed: $e")));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Export failed: $e"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5),
+          ),
+        );
       }
     } finally {
       if (mounted) {
-        setState(() => _isGenerating = false);
+        setState(() {
+          _isGenerating = false;
+          _exportProgress = 0.0;
+          _progressMessage = "";
+        });
       }
     }
   }
@@ -286,7 +349,7 @@ class _DataExportScreenState extends State<DataExportScreen> {
           IconButton(
             icon: const Icon(Iconsax.folder_open, color: ClientTheme.primaryColor),
             tooltip: "Downloaded Files",
-            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadHistoryScreen())),
+            onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadScreen())),
           )
         ],
       ),
@@ -343,53 +406,45 @@ class _DataExportScreenState extends State<DataExportScreen> {
             const SizedBox(height: 16),
             Row(
               children: [
-                Expanded(child: _buildDateTimeBox("Start Date & Time", _currentStartDate, true)),
+                Expanded(
+                  child: _buildDateTimeButton(
+                    label: "Start",
+                    dateTime: _currentStartDate,
+                    onTap: () => _pickDateTime(true),
+                  ),
+                ),
                 const SizedBox(width: 12),
-                Expanded(child: _buildDateTimeBox("End Date & Time", _currentEndDate, false)),
+                Expanded(
+                  child: _buildDateTimeButton(
+                    label: "End",
+                    dateTime: _currentEndDate,
+                    onTap: () => _pickDateTime(false),
+                  ),
+                ),
               ],
             ),
-            const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.blue.withOpacity(0.05), borderRadius: BorderRadius.circular(8)),
-              child: Row(
-                children: [
-                  const Icon(Iconsax.info_circle, size: 16, color: Colors.blue),
-                  const SizedBox(width: 8),
-                  Expanded(child: Text("Filtering ${widget.passedData.length} records available.", style: const TextStyle(fontSize: 12, color: Colors.blueGrey))),
-                ],
-              ),
-            )
           ],
         ),
       ),
     );
   }
 
-  Widget _buildDateTimeBox(String label, DateTime dt, bool isStart) {
+  Widget _buildDateTimeButton({required String label, required DateTime dateTime, required VoidCallback onTap}) {
     return InkWell(
-      onTap: () => _pickDateTime(isStart),
-      borderRadius: BorderRadius.circular(10),
+      onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+        padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
           border: Border.all(color: Colors.grey.shade300),
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(8),
           color: Colors.white,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey, fontWeight: FontWeight.bold)),
-                const Icon(Iconsax.edit, size: 14, color: ClientTheme.primaryColor),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(DateFormat('MMM dd, yyyy').format(dt), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-            Text(DateFormat('hh:mm a').format(dt), style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13, color: ClientTheme.primaryColor)),
+            Text(label, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+            const SizedBox(height: 4),
+            Text(DateFormat('yyyy-MM-dd HH:mm').format(dateTime), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
           ],
         ),
       ),
@@ -556,7 +611,7 @@ class _DataExportScreenState extends State<DataExportScreen> {
             const SizedBox(width: 8),
             ToggleButtons(
               isSelected: [_pdfOrientation == 'Portrait', _pdfOrientation == 'Landscape'],
-              onPressed: (index) {
+              onPressed: _isGenerating ? null : (index) {
                 setState(() {
                   _pdfOrientation = index == 0 ? 'Portrait' : 'Landscape';
                 });
@@ -572,7 +627,41 @@ class _DataExportScreenState extends State<DataExportScreen> {
         ),
         const SizedBox(height: 24),
         if (_isGenerating)
-          const Column(children: [CircularProgressIndicator(), SizedBox(height: 10), Text("Generating Report...")])
+          Column(
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              // Progress bar
+              Container(
+                width: 300,
+                height: 8,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: FractionallySizedBox(
+                  alignment: Alignment.centerLeft,
+                  widthFactor: _exportProgress,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: ClientTheme.primaryColor,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                _progressMessage,
+                style: const TextStyle(fontSize: 12, color: Colors.grey),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                "${(_exportProgress * 100).toStringAsFixed(0)}%",
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+              ),
+            ],
+          )
         else
           Wrap(
             spacing: 16.0,
@@ -591,7 +680,7 @@ class _DataExportScreenState extends State<DataExportScreen> {
 
   Widget _buildExportBtn(String label, IconData icon, Color color, VoidCallback onTap) {
     return ElevatedButton.icon(
-      onPressed: onTap,
+      onPressed: _isGenerating ? null : onTap,
       icon: Icon(icon, size: 18),
       label: Text(label),
       style: ElevatedButton.styleFrom(
@@ -600,6 +689,8 @@ class _DataExportScreenState extends State<DataExportScreen> {
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 2,
+        disabledBackgroundColor: Colors.grey[300],
+        disabledForegroundColor: Colors.grey[600],
       ),
     );
   }

@@ -25,9 +25,10 @@ class _ClientShellState extends State<ClientShell> {
     _restoreState();
   }
 
+  // 📌 UPDATED: Added awaits for both tab and device
   Future<void> _restoreState() async {
-    // 1. Restore Active Tab (PRIORITY)
-    final savedTab = SessionManager.getSavedTab();
+    // 1. Restore Active Tab
+    final savedTab = await SessionManager.getSavedTab(); // Await here
     if (savedTab.isNotEmpty) {
       try {
         _activeScreen = ClientScreen.values.firstWhere(
@@ -38,14 +39,11 @@ class _ClientShellState extends State<ClientShell> {
     }
 
     // 2. Restore Selected Device
-    final savedDevice = SessionManager.getSelectedDevice();
+    final savedDevice = await SessionManager.getSelectedDevice(); // Await here
     if (savedDevice != null) {
-      // 🔴 FIX: Removed the line that forced screen to 'devices'.
-      // Now it will stay on whatever screen was restored in step 1.
-
-      WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
         Provider.of<ClientProvider>(context, listen: false).restoreDevice(savedDevice);
-      });
+      }
     }
 
     if (mounted) {
@@ -53,20 +51,21 @@ class _ClientShellState extends State<ClientShell> {
     }
   }
 
-  // 🔴 UPDATED: Save tab to Session whenever it changes
-  void _onScreenSelected(ClientScreen screen) {
+  // 📌 UPDATED: Added async/await
+  Future<void> _onScreenSelected(ClientScreen screen) async {
     setState(() => _activeScreen = screen);
-    SessionManager.saveCurrentTab(screen.toString().split('.').last);
+    await SessionManager.saveCurrentTab(screen.toString().split('.').last);
   }
 
   void _goToDeviceConfig(Map<String, dynamic> selectedDevice) {
     final provider = Provider.of<ClientProvider>(context, listen: false);
     provider.selectDevice(selectedDevice);
+    // You might want to save this to SessionManager here too
+    SessionManager.saveSelectedDevice(selectedDevice);
   }
 
   @override
   Widget build(BuildContext context) {
-    // Show loader while restoring to prevent UI jumping
     if (_isRestoring) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
@@ -76,13 +75,11 @@ class _ClientShellState extends State<ClientShell> {
           final isDeviceSelected = provider.selectedDeviceRecNo != null;
 
           if (isDeviceSelected) {
-            // We pass a simple Container or Loader as child because
-            // ClientLayout now handles the actual screen switching logic internally.
             return ClientLayout(
               activeScreen: _activeScreen,
               onScreenSelected: _onScreenSelected,
               userData: widget.userData,
-              child: const SizedBox(), // Layout handles the views
+              child: const SizedBox(),
             );
           } else {
             return DeviceSelectionScreen(

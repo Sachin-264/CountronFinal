@@ -1,5 +1,5 @@
 import 'dart:convert';
-import 'dart:html' as html; // WEB ONLY
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SessionManager {
   static const String _kLoggedIn = 'isLoggedIn';
@@ -7,49 +7,61 @@ class SessionManager {
   static const String _kUserData = 'userData';
   static const String _kCurrentTab = 'currentTab';
   static const String _kSelectedDevice = 'selectedDevice';
-  static const String _kCurrentStep = 'currentStep'; // 🆕 NEW: Key for Config Step
+  static const String _kCurrentStep = 'currentStep';
 
-  // --- EXISTING AUTH METHODS ---
-  static void saveSession(String role, Map<String, dynamic> userData) {
-    html.window.sessionStorage[_kLoggedIn] = 'true';
-    html.window.sessionStorage[_kRole] = role;
-    html.window.sessionStorage[_kUserData] = jsonEncode(userData);
+  // Helper to get preferences instance
+  static Future<SharedPreferences> _getPrefs() async => await SharedPreferences.getInstance();
+
+  // --- AUTH METHODS ---
+  static Future<void> saveSession(String role, Map<String, dynamic> userData) async {
+    final prefs = await _getPrefs();
+    await prefs.setBool(_kLoggedIn, true);
+    await prefs.setString(_kRole, role);
+    await prefs.setString(_kUserData, jsonEncode(userData));
   }
 
-  static void clearSession() {
-    html.window.sessionStorage.clear();
+  static Future<void> clearSession() async {
+    final prefs = await _getPrefs();
+    await prefs.clear();
   }
 
-  static bool hasSession() {
-    return html.window.sessionStorage[_kLoggedIn] == 'true';
+  static Future<bool> hasSession() async {
+    final prefs = await _getPrefs();
+    return prefs.getBool(_kLoggedIn) ?? false;
   }
 
-  static String? getRole() {
-    return html.window.sessionStorage[_kRole];
+  static Future<String?> getRole() async {
+    final prefs = await _getPrefs();
+    return prefs.getString(_kRole);
   }
 
-  static Map<String, dynamic> getUserData() {
-    final data = html.window.sessionStorage[_kUserData];
+  static Future<Map<String, dynamic>> getUserData() async {
+    final prefs = await _getPrefs();
+    final data = prefs.getString(_kUserData);
     if (data != null) return jsonDecode(data);
     return {};
   }
 
   // --- TAB METHODS ---
-  static void saveCurrentTab(String tabName) {
-    html.window.sessionStorage[_kCurrentTab] = tabName;
+  static Future<void> saveCurrentTab(String tabName) async {
+    final prefs = await _getPrefs();
+    await prefs.setString(_kCurrentTab, tabName);
   }
 
-  static String getSavedTab() {
-    return html.window.sessionStorage[_kCurrentTab] ?? '';
+  static Future<String> getSavedTab() async {
+    final prefs = await _getPrefs();
+    return prefs.getString(_kCurrentTab) ?? '';
   }
 
   // --- DEVICE PERSISTENCE METHODS ---
-  static void saveSelectedDevice(Map<String, dynamic> deviceData) {
-    html.window.sessionStorage[_kSelectedDevice] = jsonEncode(deviceData);
+  static Future<void> saveSelectedDevice(Map<String, dynamic> deviceData) async {
+    final prefs = await _getPrefs();
+    await prefs.setString(_kSelectedDevice, jsonEncode(deviceData));
   }
 
-  static Map<String, dynamic>? getSelectedDevice() {
-    final data = html.window.sessionStorage[_kSelectedDevice];
+  static Future<Map<String, dynamic>?> getSelectedDevice() async {
+    final prefs = await _getPrefs();
+    final data = prefs.getString(_kSelectedDevice);
     if (data != null && data.isNotEmpty) {
       try {
         return jsonDecode(data);
@@ -60,12 +72,14 @@ class SessionManager {
     return null;
   }
 
-  // --- 🆕 NEW: STEP PERSISTENCE METHODS ---
-  static void saveCurrentStep(String stepName) {
-    html.window.sessionStorage[_kCurrentStep] = stepName;
+  // --- STEP PERSISTENCE METHODS ---
+  static Future<void> saveCurrentStep(String stepName) async {
+    final prefs = await _getPrefs();
+    await prefs.setString(_kCurrentStep, stepName);
   }
 
-  static String getSavedStep() {
-    return html.window.sessionStorage[_kCurrentStep] ?? '';
+  static Future<String> getSavedStep() async {
+    final prefs = await _getPrefs();
+    return prefs.getString(_kCurrentStep) ?? '';
   }
 }

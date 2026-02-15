@@ -210,6 +210,7 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
           _lastApiCallTime = _endDate;
         });
 
+        // FIXED: Only check alarms if we actually have new data AND we are in Live Mode
         if (newPoints.isNotEmpty && _isLiveActive) {
           _checkNewPointsForAlarms(newPoints, activeChannels, provider.selectedDeviceRecNo!);
         }
@@ -221,33 +222,38 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
     }
   }
 
+  // === [FIXED] ALARM CHECK FUNCTION ===
+  // Previously this looped through ALL 3000 points, causing thousands of API calls and crashing the app.
   void _checkNewPointsForAlarms(List<ChannelDataPoint> newPoints, List<Map<String, dynamic>> channels, int deviceRecNo) {
-    debugPrint("[ALARM] Checking ${newPoints.length} new data points for alarms...");
-    for (var point in newPoints) {
-      for (var c in channels) {
-        String id = c['ChannelRecNo'].toString();
-        String name = c['ChannelName'] ?? 'Unknown';
+    if (newPoints.isEmpty) return;
 
-        double? val = point.values[id] as double?;
-        double? highLimit = double.tryParse(c['Effective_HighLimits']?.toString() ?? '');
-        double? lowLimit = double.tryParse(c['Effective_LowLimits']?.toString() ?? '');
+    // OPTIMIZATION: Only check the LATEST data point.
+    // We only care if the current status is Alarm, not historical data from an hour ago.
+    final latestPoint = newPoints.last;
 
-        if (val == null) continue;
+    for (var c in channels) {
+      String id = c['ChannelRecNo'].toString();
+      String name = c['ChannelName'] ?? 'Unknown';
 
-        bool isHigh = (highLimit != null && val > highLimit);
-        bool isLow = (lowLimit != null && val < lowLimit);
+      double? val = latestPoint.values[id] as double?;
+      double? highLimit = double.tryParse(c['Effective_HighLimits']?.toString() ?? '');
+      double? lowLimit = double.tryParse(c['Effective_LowLimits']?.toString() ?? '');
 
-        if (isHigh || isLow) {
-          debugPrint("[ALARM TRIGGER] $name Value: $val (High: $highLimit, Low: $lowLimit)");
-          _triggerAlarmBackend(
-            deviceRecNo: deviceRecNo,
-            channelRecNo: int.parse(id),
-            channelName: name,
-            value: val,
-            highLimit: highLimit,
-            lowLimit: lowLimit,
-          );
-        }
+      if (val == null) continue;
+
+      bool isHigh = (highLimit != null && val > highLimit);
+      bool isLow = (lowLimit != null && val < lowLimit);
+
+      if (isHigh || isLow) {
+        // Send alarm only for the latest point
+        _triggerAlarmBackend(
+          deviceRecNo: deviceRecNo,
+          channelRecNo: int.parse(id),
+          channelName: name,
+          value: val,
+          highLimit: highLimit,
+          lowLimit: lowLimit,
+        );
       }
     }
   }
@@ -272,13 +278,13 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
         "LowLimit": lowLimit
       };
 
-      debugPrint("[ALARM SENDING] Sending alarm to backend...");
+      // debugPrint("[ALARM SENDING] Sending alarm to backend...");
       final response = await http.post(
         Uri.parse(baseUrl),
         headers: {"Content-Type": "application/json"},
         body: jsonEncode(body),
       );
-      debugPrint("[ALARM RESPONSE] Code: ${response.statusCode} | Body: ${response.body}");
+      debugPrint("[ALARM RESPONSE] Code: ${response.statusCode}");
     } catch (e) {
       debugPrint("[ALARM FAILURE] Could not send alarm: $e");
     }
@@ -980,49 +986,7 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
     );
   }
 
-  List<PlotBand> _buildTargetLines() {
-    List<PlotBand> bands = [];
-    final activeChannels = _customizableChannels.where((c) => c['isVisible'] ?? true).toList();
-
-    for (var c in activeChannels) {
-      double? highLimit = double.tryParse(c['Effective_HighLimits']?.toString() ?? '');
-      double? lowLimit = double.tryParse(c['Effective_LowLimits']?.toString() ?? '');
-
-      Color alarmColor = Colors.red;
-      try {
-        String? hex = c['Effective_AlarmColor']?.toString().replaceAll('#', '');
-        if (hex != null && hex.isNotEmpty) alarmColor = Color(int.parse('FF$hex', radix: 16));
-      } catch(e) {}
-
-      if (highLimit != null) {
-        bands.add(PlotBand(
-          start: highLimit,
-          end: highLimit,
-          borderWidth: 1,
-          borderColor: alarmColor.withOpacity(0.7),
-          dashArray: const <double>[5, 5],
-          text: 'High ${c['ChannelName'] ?? ''}',
-          textStyle: TextStyle(color: alarmColor, fontSize: 10),
-          horizontalTextAlignment: TextAnchor.end,
-        ));
-      }
-      if (lowLimit != null) {
-        bands.add(PlotBand(
-          start: lowLimit,
-          end: lowLimit,
-          borderWidth: 1,
-          borderColor: alarmColor.withOpacity(0.7),
-          dashArray: const <double>[5, 5],
-          text: 'Low ${c['ChannelName'] ?? ''}',
-          textStyle: TextStyle(color: alarmColor, fontSize: 10),
-          horizontalTextAlignment: TextAnchor.end,
-        ));
-      }
-    }
-    return bands;
-  }
-
-// --- CHART WIDGET ---
+// --- CHART WIDGET (UPDATED to FastLineSeries) ---
   Widget _buildSyncfusionLineChart() {
     final visibleChannels = _customizableChannels.where((c) => c['isVisible'] ?? true).toList();
     List<CartesianSeries> series = [];
@@ -1054,7 +1018,8 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
         alarmColor = Colors.red;
       }
 
-      series.add(LineSeries<ChannelDataPoint, DateTime>(
+      // SWITCHED TO FastLineSeries for PERFORMANCE with large datasets
+      series.add(FastLineSeries<ChannelDataPoint, DateTime>(
         dataSource: _dataPoints,
         xValueMapper: (d, _) => d.dateTime,
         yValueMapper: (d, _) => d.values[id] as double?,
@@ -1063,26 +1028,7 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
         width: 2.0,
         animationDuration: 0,
         emptyPointSettings: const EmptyPointSettings(mode: EmptyPointMode.gap),
-
-        // === HIGHLIGHT LOGIC ===
-        // This makes the line turn Alarm Color ONLY when limits are crossed
-        pointColorMapper: (ChannelDataPoint data, int index) {
-          double? val = data.values[id] as double?;
-          if (val == null) return graphColor;
-
-          if (highLimit != null && val > highLimit) {
-            return alarmColor; // Highlight High
-          }
-          if (lowLimit != null && val < lowLimit) {
-            return alarmColor; // Highlight Low
-          }
-          return graphColor; // Normal
-        },
-
-        selectionBehavior: SelectionBehavior(
-          enable: true,
-          toggleSelection: true,
-        ),
+        selectionBehavior: SelectionBehavior(enable: true, toggleSelection: true),
       ));
     }
 
@@ -1105,7 +1051,6 @@ class _ChannelDataScreenState extends State<ChannelDataScreen> {
           majorGridLines: MajorGridLines(width: 1, color: Colors.grey.withOpacity(0.1)),
           axisLine: const AxisLine(width: 0),
           rangePadding: ChartRangePadding.round,
-          // REMOVED: plotBands (Dashed lines) as requested
         ),
         zoomPanBehavior: ZoomPanBehavior(
           enablePinching: true,

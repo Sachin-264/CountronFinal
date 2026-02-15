@@ -58,7 +58,8 @@ class SettingsScreen extends StatelessWidget {
     );
   }
 
-  // === UPDATED PROFILE CARD WITH LOGOUT ===
+  // === UPDATED PROFILE CARD (Sign Out in Header, No Row Overflow) ===
+// === IMPROVED PROFILE CARD FOR MOBILE ===
   Widget _buildAdminProfileCard(BuildContext context, {required bool isDesktop}) {
     final theme = Theme.of(context);
     final adminProvider = Provider.of<AdminProvider>(context);
@@ -68,7 +69,7 @@ class SettingsScreen extends StatelessWidget {
 
     return Container(
       width: isDesktop ? 600 : double.infinity,
-      padding: const EdgeInsets.all(30),
+      padding: EdgeInsets.all(isDesktop ? 30 : 20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [AppTheme.background, AppTheme.lightGrey.withOpacity(0.5)],
@@ -88,163 +89,128 @@ class SettingsScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Avatar and Name Row
+          // Header Row: Name & Logout (Avatar Removed)
           Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              Stack(
-                children: [
-                  Container(
-                    width: 70,
-                    height: 70,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      gradient: AppTheme.primaryGradient,
-                      boxShadow: [
-                        BoxShadow(color: AppTheme.primaryBlue.withOpacity(0.4), blurRadius: 10)
-                      ],
-                    ),
-                    child: Center(
-                      child: Text(
-                        adminName.isNotEmpty ? adminName.split(' ').map((e) => e.isNotEmpty ? e.substring(0, 1) : '').take(2).join() : 'A',
-                        style: theme.textTheme.headlineSmall?.copyWith(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                    ),
-                  ),
-                  Positioned(
-                    bottom: 0,
-                    right: 0,
-                    child: Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: AppTheme.accentGreen,
-                        shape: BoxShape.circle,
-                        border: Border.all(color: AppTheme.background, width: 2),
-                      ),
-                      child: const Icon(Iconsax.tick_circle, size: 16, color: Colors.white),
-                    ),
-                  )
-                ],
-              ),
-              const SizedBox(width: 24),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Admin Profile',
-                      style: theme.textTheme.labelLarge?.copyWith(color: AppTheme.primaryBlue, fontWeight: FontWeight.w600, letterSpacing: 1.2),
+                      'ADMIN ACCOUNT',
+                      style: theme.textTheme.labelLarge?.copyWith(
+                          color: AppTheme.primaryBlue,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.5
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       adminName,
-                      style: theme.textTheme.headlineMedium?.copyWith(color: AppTheme.darkText, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      'System Administrator',
-                      style: theme.textTheme.bodyLarge?.copyWith(color: AppTheme.accentGreen, fontWeight: FontWeight.w600),
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                          color: AppTheme.darkText,
+                          fontWeight: FontWeight.bold
+                      ),
                     ),
                   ],
                 ),
               ),
-            ],
-          ),
-
-          const Divider(height: 30),
-
-          _buildDetailRow(context, Iconsax.sms_tracking, 'Email', adminEmail),
-          _buildDetailRow(context, Iconsax.user, 'Username', adminProvider.username),
-
-          const SizedBox(height: 24),
-
-          // === ACTION BUTTONS ROW ===
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // 1. LOGOUT BUTTON (Left side)
-              OutlinedButton.icon(
+              IconButton(
                 onPressed: () {
-                  // Clear Data
                   Provider.of<AdminProvider>(context, listen: false).clearData();
-                  // Logout
                   Navigator.of(context).pushAndRemoveUntil(
                     MaterialPageRoute(builder: (context) => const LoginScreen()),
                         (route) => false,
                   );
                 },
-                icon: Icon(Iconsax.logout, size: 18, color: AppTheme.accentRed),
-                label: Text('Sign Out', style: TextStyle(color: AppTheme.accentRed, fontWeight: FontWeight.bold)),
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  side: BorderSide(color: AppTheme.accentRed.withOpacity(0.3)),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                ),
-              ),
-
-              // 2. CHANGE PASSWORD BUTTON (Right side)
-              ElevatedButton.icon(
-                onPressed: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AdminResetPasswordDialog(adminRecNo: adminRecNo),
-                  );
-                },
-                icon: const Icon(Iconsax.lock_1, size: 18),
-                label: const Text('Change Password'),
-                style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.primaryBlue,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                    elevation: 2,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12)
+                icon: Icon(Iconsax.logout, color: AppTheme.accentRed),
+                tooltip: 'Sign Out',
+                style: IconButton.styleFrom(
+                  backgroundColor: AppTheme.accentRed.withOpacity(0.1),
+                  padding: const EdgeInsets.all(12),
                 ),
               ),
             ],
+          ),
+
+          const Divider(height: 32),
+
+          // Detail Rows: Vertical stacking for mobile to prevent email cutting
+          _buildResponsiveDetail(context, Iconsax.sms_tracking, 'Email Address', adminEmail, isDesktop),
+          const SizedBox(height: 16),
+          _buildResponsiveDetail(context, Iconsax.user, 'Username', adminProvider.username, isDesktop),
+          const SizedBox(height: 16),
+          _buildResponsiveDetail(context, Iconsax.verify, 'System Role', 'Administrator', isDesktop),
+
+          const SizedBox(height: 30),
+
+          // Full width Change Password Button
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (ctx) => AdminResetPasswordDialog(adminRecNo: adminRecNo),
+                );
+              },
+              icon: const Icon(Iconsax.lock_1, size: 20),
+              label: const Text('Change Password'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryBlue,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                elevation: 0,
+              ),
+            ),
           )
         ],
       ),
     );
   }
 
-  Widget _buildPlaceholderCard(BuildContext context, {required String title, required String subtitle, required IconData icon, required Color color}) {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.05),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Row(
+// Helper Widget to switch between horizontal and vertical detail views
+  Widget _buildResponsiveDetail(BuildContext context, IconData icon, String label, String value, bool isDesktop) {
+    if (isDesktop) {
+      // Standard horizontal row for wide screens
+      return _buildDetailRow(context, icon, label, value);
+    } else {
+      // Stacked layout for Mobile to allow long emails/text
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(icon, color: Colors.white, size: 24),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.darkText, fontWeight: FontWeight.w600),
+          Row(
+            children: [
+              Icon(icon, size: 16, color: AppTheme.primaryBlue.withOpacity(0.7)),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: AppTheme.bodyText,
+                    fontWeight: FontWeight.w600
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.bodyText),
-                ),
-              ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(left: 24.0),
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                  color: AppTheme.darkText,
+                  fontWeight: FontWeight.bold
+              ),
+              softWrap: true,
+              overflow: TextOverflow.visible, // Ensures long emails wrap to next line instead of cutting
             ),
           ),
-          Icon(Iconsax.arrow_right_3, color: color, size: 20),
         ],
-      ),
-    );
+      );
+    }
   }
 
   @override
@@ -252,58 +218,21 @@ class SettingsScreen extends StatelessWidget {
     final size = MediaQuery.of(context).size;
     final isDesktop = size.width > 900;
 
-    final emailConfigCard = _buildPlaceholderCard(
-      context,
-      title: 'Email Configuration',
-      subtitle: 'Manage SMTP settings for alerts and notifications.',
-      icon: Iconsax.message_add,
-      color: AppTheme.accentRed,
-    );
-
-    Widget buildTopSection() {
-      if (isDesktop) {
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildAdminProfileCard(context, isDesktop: isDesktop),
-            const SizedBox(width: 24),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _buildSectionHeader(context, 'General Settings', Iconsax.global, AppTheme.accentGreen),
-                  const SizedBox(height: 16),
-                  emailConfigCard,
-                ],
-              ),
-            ),
-          ],
-        );
-      } else {
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _buildAdminProfileCard(context, isDesktop: isDesktop),
-            const SizedBox(height: 24),
-            _buildSectionHeader(context, 'General Settings', Iconsax.global, AppTheme.accentGreen),
-            const SizedBox(height: 16),
-            emailConfigCard,
-          ],
-        );
-      }
-    }
-
     return SingleChildScrollView(
-      padding: EdgeInsets.zero,
+      padding: const EdgeInsets.all(20),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          buildTopSection(),
+          // Top Section: Only Profile Card
+          _buildAdminProfileCard(context, isDesktop: isDesktop),
+
           SizedBox(height: isDesktop ? 40 : 24),
+
+          // System Configuration Section
           _buildSectionHeader(context, 'System Configuration', Iconsax.setting_4, AppTheme.accentPurple),
           SizedBox(height: isDesktop ? 24 : 16),
           _InputTypeMasterManager(),
-          // Removed bottom logout button spacer
+
           const SizedBox(height: 40),
         ],
       ),
@@ -311,7 +240,7 @@ class SettingsScreen extends StatelessWidget {
   }
 }
 
-// ... (_InputTypeMasterManager remains exactly the same) ...
+// === InputTypeMasterManager (Logical Master for CRUD) ===
 class _InputTypeMasterManager extends StatefulWidget {
   @override
   __InputTypeMasterManagerState createState() => __InputTypeMasterManagerState();
@@ -366,7 +295,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
             return AlertDialog(
-              title: Text('Create New Input Type'),
+              title: const Text('Create New Input Type'),
               content: Form(
                 key: _formKey,
                 child: SingleChildScrollView(
@@ -378,7 +307,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
                       Row(
                         children: [
                           Text('Is Linear?', style: Theme.of(context).textTheme.bodyLarge),
-                          Spacer(),
+                          const Spacer(),
                           Switch(
                             value: _isLinearInput,
                             onChanged: (bool value) {
@@ -407,7 +336,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
                         _createMinRangeController,
                         'Default Min Range *',
                         Iconsax.arrow_down_1,
-                        keyboardType: TextInputType.numberWithOptions(decimal: true, signed: true),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                         validator: (v) => v!.isEmpty ? 'Required' : null,
                       ),
                       const SizedBox(height: 12),
@@ -416,7 +345,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
                         _createMaxRangeController,
                         'Default Max Range *',
                         Iconsax.arrow_up_3,
-                        keyboardType: TextInputType.numberWithOptions(decimal: true, signed: true),
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                         validator: (v) => v!.isEmpty ? 'Required' : null,
                       ),
                     ],
@@ -507,7 +436,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
                     _editMinRangeController,
                     'Default Min Range *',
                     Iconsax.arrow_down_1,
-                    keyboardType: TextInputType.numberWithOptions(decimal: true, signed: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                     validator: (v) => v!.isEmpty ? 'Required' : null,
                   ),
                   const SizedBox(height: 12),
@@ -516,7 +445,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
                     _editMaxRangeController,
                     'Default Max Range *',
                     Iconsax.arrow_up_3,
-                    keyboardType: TextInputType.numberWithOptions(decimal: true, signed: true),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true, signed: true),
                     validator: (v) => v!.isEmpty ? 'Required' : null,
                   ),
                 ],
@@ -563,7 +492,7 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
           content: Text(
             isSystemType
                 ? 'Input Type ID ${inputType['InputTypeID']} is a fundamental system type ("${inputType['TypeName']}") and cannot be deleted.'
-                : 'Are you sure you want to permanently delete the custom input type "${inputType['TypeName']}"? This action cannot be undone. Any channels using this type will be affected.',
+                : 'Are you sure you want to permanently delete the custom input type "${inputType['TypeName']}"? This action cannot be undone.',
           ),
           actions: [
             TextButton(
@@ -584,7 +513,6 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
 
   Future<void> _createInputType(String name, bool isLinear, double? min, double? max, int? decimals) async {
     Navigator.pop(context);
-
     try {
       await _apiService.createInputType(
         typeName: name,
@@ -602,7 +530,6 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
 
   Future<void> _updateInputType(int id, String name, double? min, double? max, int? decimals) async {
     Navigator.pop(context);
-
     try {
       await _apiService.updateInputType(
         id: id,
@@ -620,11 +547,10 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
 
   Future<void> _deleteInputType(int id) async {
     Navigator.pop(context);
-
     try {
       await _apiService.deleteInputType(id: id);
       _loadInputTypes();
-      _showSnackbar('Input Type deleted successfully!', isError: false);
+      _showSnackbar('Input Type deleted successfully!');
     } catch (e) {
       _showSnackbar('Failed to delete: ${e.toString()}', isError: true);
     }
@@ -654,14 +580,13 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     final size = MediaQuery.of(context).size;
     final isDesktop = size.width > 700;
 
     if (_isLoading) {
-      return Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue));
+      return const Center(child: CircularProgressIndicator(color: AppTheme.primaryBlue));
     }
 
     return Container(
@@ -688,8 +613,8 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
               ),
               ElevatedButton.icon(
                 onPressed: _showCreateDialog,
-                icon: Icon(Iconsax.add_circle, size: 20),
-                label: Text('Create New Type'),
+                icon: const Icon(Iconsax.add_circle, size: 20),
+                label: const Text('Create New Type'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppTheme.accentGreen,
                   foregroundColor: Colors.white,
@@ -700,20 +625,15 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
             ],
           ),
           const SizedBox(height: 16),
-
-          if (isDesktop)
-            _buildInputTypeTable(context)
-          else
-            _buildInputTypeMobileList(context),
+          isDesktop ? _buildInputTypeTable(context) : _buildInputTypeMobileList(context),
         ],
       ),
     );
   }
 
-  // === IMPROVED MOBILE LAYOUT ===
   Widget _buildInputTypeMobileList(BuildContext context) {
     return ListView.separated(
-      physics: NeverScrollableScrollPhysics(),
+      physics: const NeverScrollableScrollPhysics(),
       shrinkWrap: true,
       itemCount: _inputTypes.length,
       separatorBuilder: (context, index) => const SizedBox(height: 12),
@@ -721,7 +641,6 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
         final type = _inputTypes[index];
         final bool isSystemType = type['InputTypeID'] >= 0 && type['InputTypeID'] <= 5;
         final bool isLinear = type['IsLinear'] == 1 || type['IsLinear'] == true;
-
         final Color iconColor = isLinear ? AppTheme.accentPink : AppTheme.primaryBlue;
 
         return Container(
@@ -729,98 +648,44 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
             color: isSystemType ? AppTheme.lightGrey.withOpacity(0.5) : AppTheme.background,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(color: AppTheme.borderGrey.withOpacity(0.5)),
-            boxShadow: [
-              BoxShadow(color: AppTheme.shadowColor.withOpacity(0.05), blurRadius: 8)
-            ],
           ),
           child: Column(
             children: [
-              // Header Row
               ListTile(
-                contentPadding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-                leading: Icon(
-                  isLinear ? Iconsax.activity : Iconsax.truck_remove,
-                  color: iconColor,
-                ),
-                title: Text(
-                  '${type['TypeName']}',
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold),
-                ),
-                subtitle: Text(
-                  'ID: ${type['InputTypeID']} • ${isLinear ? 'Linear' : 'Non-Linear'}',
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.bodyText),
-                ),
+                leading: Icon(isLinear ? Iconsax.activity : Iconsax.truck_remove, color: iconColor),
+                title: Text('${type['TypeName']}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                subtitle: Text('ID: ${type['InputTypeID']} • ${isLinear ? 'Linear' : 'Non-Linear'}'),
                 trailing: IconButton(
                   icon: Icon(Iconsax.edit, color: AppTheme.accentPurple),
                   onPressed: () => _showEditDialog(type),
                 ),
               ),
-              const Divider(height: 1, indent: 16, endIndent: 16),
-
-              // Body Rows
+              const Divider(height: 1),
               Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+                padding: const EdgeInsets.all(16),
                 child: Column(
                   children: [
-                    // Row 1: Min and Max Range
                     Row(
                       children: [
-                        Expanded(child: _buildMobileInfoChip(context, 'Min Range', '${type['DefaultMinRange'] ?? '-'}', Iconsax.arrow_down_1)),
+                        Expanded(child: _buildMobileInfoChip(context, 'Min', '${type['DefaultMinRange'] ?? '-'}', Iconsax.arrow_down_1)),
                         const SizedBox(width: 16),
-                        Expanded(child: _buildMobileInfoChip(context, 'Max Range', '${type['DefaultMaxRange'] ?? '-'}', Iconsax.arrow_up_3)),
+                        Expanded(child: _buildMobileInfoChip(context, 'Max', '${type['DefaultMaxRange'] ?? '-'}', Iconsax.arrow_up_3)),
                       ],
                     ),
-
-                    const SizedBox(height: 16),
-
-                    // Row 2: Decimals and Delete (Using available space)
+                    const SizedBox(height: 12),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      crossAxisAlignment: CrossAxisAlignment.center,
                       children: [
-                        // Left: Decimals (Only if non-linear)
                         if (!isLinear)
-                          Expanded(child: _buildMobileInfoChip(context, 'Decimals', '${type['DefaultDecimalPlaces'] ?? '-'}', Iconsax.decred_dcr))
+                          _buildMobileInfoChip(context, 'Decimals', '${type['DefaultDecimalPlaces'] ?? '-'}', Iconsax.decred_dcr)
                         else
-                          const Spacer(),
-
-                        // Right: Delete Button with Proper Text
+                          const SizedBox(),
                         if (!isSystemType)
                           OutlinedButton.icon(
                             onPressed: () => _showDeleteConfirmDialog(type),
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: AppTheme.accentRed,
-                              side: BorderSide(color: AppTheme.accentRed.withOpacity(0.5)),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10), // Bigger padding
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
-                            icon: const Icon(Iconsax.trash, size: 18),
-                            label: const Text('Delete Type', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)), // Proper Text
-                          )
-                        else
-                        // System Locked Badge
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                            decoration: BoxDecoration(
-                              color: AppTheme.borderGrey.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: AppTheme.borderGrey.withOpacity(0.5)),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Iconsax.lock, size: 16, color: AppTheme.bodyText.withOpacity(0.5)),
-                                const SizedBox(width: 8),
-                                Text(
-                                  "System Locked",
-                                  style: TextStyle(
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.bold,
-                                      color: AppTheme.bodyText.withOpacity(0.6)
-                                  ),
-                                ),
-                              ],
-                            ),
+                            style: OutlinedButton.styleFrom(foregroundColor: AppTheme.accentRed),
+                            icon: const Icon(Iconsax.trash, size: 16),
+                            label: const Text('Delete'),
                           ),
                       ],
                     )
@@ -834,24 +699,21 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
     );
   }
 
-  // Mobile Info Chip Helper
   Widget _buildMobileInfoChip(BuildContext context, String label, String value, IconData icon) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
           children: [
-            Icon(icon, size: 14, color: AppTheme.bodyText.withOpacity(0.7)),
+            Icon(icon, size: 12, color: AppTheme.bodyText),
             const SizedBox(width: 4),
             Text(label, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
-        const SizedBox(height: 4),
-        Text(value, style: Theme.of(context).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.darkText)),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
       ],
     );
   }
-
 
   Widget _buildInputTypeTable(BuildContext context) {
     return Table(
@@ -862,8 +724,8 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
         2: FlexColumnWidth(1.2),
         3: FlexColumnWidth(1),
         4: FlexColumnWidth(1),
-        5: FixedColumnWidth(50), // Edit
-        6: FixedColumnWidth(50), // Delete
+        5: FixedColumnWidth(50),
+        6: FixedColumnWidth(50),
       },
       children: [
         _buildTableHeaderRow(context),
@@ -873,89 +735,38 @@ class __InputTypeMasterManagerState extends State<_InputTypeMasterManager> {
   }
 
   TableRow _buildTableHeaderRow(BuildContext context) {
-    final style = Theme.of(context).textTheme.titleSmall?.copyWith(
-      fontWeight: FontWeight.bold,
-      color: AppTheme.primaryBlue,
-    );
+    final style = TextStyle(fontWeight: FontWeight.bold, color: AppTheme.primaryBlue);
     return TableRow(
-      decoration: BoxDecoration(
-        color: AppTheme.lightGrey.withOpacity(0.5),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: AppTheme.lightGrey.withOpacity(0.5)),
       children: [
-        _buildHeaderCell(context, 'ID', style),
-        _buildHeaderCell(context, 'Type Name', style),
-        _buildHeaderCell(context, 'Linear', style),
-        _buildHeaderCell(context, 'Min Range', style),
-        _buildHeaderCell(context, 'Max Range', style),
-        _buildHeaderCell(context, 'Edit', style, TextAlign.center),
-        _buildHeaderCell(context, 'Del', style, TextAlign.center),
+        _buildTableCell(context, 'ID', style, TextAlign.center),
+        _buildTableCell(context, 'Type Name', style),
+        _buildTableCell(context, 'Linear', style),
+        _buildTableCell(context, 'Min', style),
+        _buildTableCell(context, 'Max', style),
+        const SizedBox(),
+        const SizedBox(),
       ],
-    );
-  }
-
-  Widget _buildHeaderCell(BuildContext context, String text, TextStyle? style, [TextAlign align = TextAlign.left]) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
-      child: Text(text, style: style, textAlign: align),
     );
   }
 
   TableRow _buildTableRow(BuildContext context, Map<String, dynamic> type) {
     final bool isSystemType = type['InputTypeID'] >= 0 && type['InputTypeID'] <= 5;
-    final bool isLinear = type['IsLinear'] == 1 || type['IsLinear'] == true;
-    final Color rowColor = isSystemType ? AppTheme.lightGrey.withOpacity(0.5) : Colors.transparent;
-
-    final cellStyle = Theme.of(context).textTheme.bodyMedium?.copyWith(
-      color: AppTheme.darkText,
-      fontWeight: FontWeight.w500,
-    );
-
     return TableRow(
-      decoration: BoxDecoration(
-        color: rowColor,
-        border: Border(bottom: BorderSide(color: AppTheme.borderGrey.withOpacity(0.5))),
-      ),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppTheme.borderGrey.withOpacity(0.3)))),
       children: [
-        _buildTableCell(context, '${type['InputTypeID']}', cellStyle, TextAlign.center),
-        _buildTableCell(context, type['TypeName'], cellStyle),
-        _buildTableCell(
-            context,
-            isLinear ? 'Yes' : 'No',
-            cellStyle?.copyWith(color: isLinear ? AppTheme.accentPink : AppTheme.primaryBlue)
-        ),
-        _buildTableCell(context, '${type['DefaultMinRange'] ?? '-'}', cellStyle),
-        _buildTableCell(context, '${type['DefaultMaxRange'] ?? '-'}', cellStyle),
-        // Edit Button
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Center(
-            child: IconButton(
-              icon: Icon(Iconsax.edit, size: 18, color: AppTheme.accentPurple),
-              onPressed: () => _showEditDialog(type),
-              tooltip: 'Edit Ranges',
-            ),
-          ),
-        ),
-        // Delete Button (Disabled for System Types 0-5)
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8.0),
-          child: Center(
-            child: IconButton(
-              icon: Icon(Iconsax.trash, size: 18, color: isSystemType ? AppTheme.borderGrey : AppTheme.accentRed),
-              onPressed: isSystemType ? null : () => _showDeleteConfirmDialog(type),
-              tooltip: isSystemType ? 'Cannot delete system type' : 'Delete Custom Type',
-            ),
-          ),
-        ),
+        _buildTableCell(context, '${type['InputTypeID']}', null, TextAlign.center),
+        _buildTableCell(context, type['TypeName'], null),
+        _buildTableCell(context, type['IsLinear'] == 1 ? 'Yes' : 'No', null),
+        _buildTableCell(context, '${type['DefaultMinRange'] ?? '-'}', null),
+        _buildTableCell(context, '${type['DefaultMaxRange'] ?? '-'}', null),
+        IconButton(icon: Icon(Iconsax.edit, size: 18, color: AppTheme.accentPurple), onPressed: () => _showEditDialog(type)),
+        IconButton(icon: Icon(Iconsax.trash, size: 18, color: isSystemType ? Colors.grey : AppTheme.accentRed), onPressed: isSystemType ? null : () => _showDeleteConfirmDialog(type)),
       ],
     );
   }
 
   Widget _buildTableCell(BuildContext context, String text, TextStyle? style, [TextAlign align = TextAlign.left]) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 12.0, horizontal: 8.0),
-      child: Text(text, style: style, textAlign: align),
-    );
+    return Padding(padding: const EdgeInsets.all(12), child: Text(text, style: style, textAlign: align));
   }
 }

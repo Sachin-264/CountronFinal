@@ -10,7 +10,7 @@ import 'package:flutter_colorpicker/flutter_colorpicker.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 import '../AdminService/input_type_api_service.dart';
-import '../AdminService/client_api_service.dart'; // NEW IMPORT
+import '../AdminService/client_api_service.dart';
 import '../theme/client_theme.dart';
 import '../widgets/constants.dart';
 
@@ -371,6 +371,8 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
     }
 
     final channels = _mutableChannels;
+    // Check for mobile width
+    final isMobile = MediaQuery.of(context).size.width < 600;
 
     return Scaffold(
       backgroundColor: ClientTheme.background,
@@ -379,7 +381,44 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
         children: [
           Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Row(
+            // Use different layout for Header based on screen size
+            child: isMobile
+                ? Column( // MOBILE HEADER
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            "Channel Setup",
+                            style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: ClientTheme.textDark),
+                          ),
+                          if (_currentChannelLimit > 0)
+                            Text(
+                              "Restricted to first $_currentChannelLimit",
+                              style: TextStyle(fontSize: 11, color: ClientTheme.error, fontWeight: FontWeight.bold),
+                            )
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Buttons stacked below title for mobile
+                Row(
+                  children: [
+                    Expanded(child: _buildSelectAllButton()),
+                    const SizedBox(width: 12),
+                    Expanded(child: _buildTopSaveButton()),
+                  ],
+                )
+              ],
+            )
+                : Row( // DESKTOP HEADER (Original)
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -391,7 +430,6 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                         "Channel Setup",
                         style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold, color: ClientTheme.textDark),
                       ),
-                      // Optional: Show limit indicator
                       if (_currentChannelLimit > 0)
                         Text(
                           "Access Restricted to First $_currentChannelLimit Channels",
@@ -400,7 +438,6 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                     ],
                   ),
                 ),
-                // Select All Button here
                 const SizedBox(width: 8),
                 _buildSelectAllButton(),
                 const SizedBox(width: 8),
@@ -417,7 +454,6 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                   children: [
                     Text("No channels available.", style: ClientTheme.themeData.textTheme.titleLarge),
                     const SizedBox(height: 10),
-                    // Retry Button
                     ElevatedButton.icon(
                       onPressed: _initialSetup,
                       icon: const Icon(Iconsax.refresh, size: 18),
@@ -432,7 +468,7 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
               itemBuilder: (context, index) {
                 final channel = channels[index];
                 final mapID = channel['MapID'] as int;
-                final channelID= channel['ChannelID'] ;
+                final channelID = channel['ChannelID'];
                 final isSelected = _channelSelection[mapID] ?? false;
 
                 final String lowLimits = channel['Effective_LowLimits']?.toString() ?? 'N/A';
@@ -444,9 +480,9 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                 return Padding(
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Card(
-                    elevation: 5,
+                    elevation: 4,
                     shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(16),
+                        borderRadius: BorderRadius.circular(12),
                         side: BorderSide(
                           color: ClientTheme.textLight.withOpacity(0.1),
                           width: 1.0,
@@ -454,117 +490,117 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                     ),
                     color: ClientTheme.surface,
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(12),
                       onTap: () {
                         _showChannelDetailsDialog(context, channel, _inputTypes);
                       },
                       child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8.0, horizontal: 16.0),
+                        padding: const EdgeInsets.all(12.0),
                         child: Row(
                           children: [
+                            // 1. Color Strip
                             Container(
-                              width: 8,
-                              height: 60,
+                              width: 6,
+                              height: 50,
                               decoration: BoxDecoration(
                                 color: colorIndicator,
-                                borderRadius: BorderRadius.circular(5),
+                                borderRadius: BorderRadius.circular(4),
                               ),
                             ),
                             const SizedBox(width: 12),
+
+                            // 2. Main Content
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
+                                      // ID Badge
                                       Container(
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: ClientTheme.primaryColor,
-                                          borderRadius: BorderRadius.circular(6),
+                                          color: ClientTheme.primaryColor.withOpacity(0.1),
+                                          borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
                                           "$channelID",
-                                          style: const TextStyle(
-                                            color: Colors.white,
-                                            fontWeight: FontWeight.w800,
-                                            fontSize: 12,
+                                          style: TextStyle(
+                                            color: ClientTheme.primaryColor,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 11,
                                           ),
                                         ),
                                       ),
                                       const SizedBox(width: 8),
 
-                                      Flexible(
+                                      // Name
+                                      Expanded(
                                         child: Text(
-                                          channel['ChannelName'] ?? 'Unnamed Channel',
-                                          style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontSize: 18, fontWeight: FontWeight.w800, color: ClientTheme.textDark),
+                                          channel['ChannelName'] ?? 'Unnamed',
+                                          style: ClientTheme.themeData.textTheme.titleMedium?.copyWith(
+                                              fontWeight: FontWeight.bold,
+                                              color: ClientTheme.textDark,
+                                              fontSize: 16
+                                          ),
                                           overflow: TextOverflow.ellipsis,
+                                          maxLines: 1,
                                         ),
                                       ),
-
-                                      if (isSelected) ...[
-                                        const SizedBox(width: 8),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: ClientTheme.success.withOpacity(0.1),
-                                            borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(color: ClientTheme.success.withOpacity(0.3)),
-                                          ),
-                                          child: Text(
-                                            "SELECTED",
-                                            style: TextStyle(
-                                              color: ClientTheme.success,
-                                              fontSize: 10,
-                                              fontWeight: FontWeight.bold,
-                                              letterSpacing: 0.5,
-                                            ),
-                                          ),
-                                        ),
-                                      ],
                                     ],
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    "Limits: $lowLimits - $highLimits | Unit: ${channel['Unit'] ?? '-'}",
-                                    style: ClientTheme.themeData.textTheme.bodyMedium?.copyWith(color: ClientTheme.textLight),
-                                    overflow: TextOverflow.ellipsis,
+                                  const SizedBox(height: 4),
+
+                                  // Details Row (Wrap for mobile safety)
+                                  Wrap(
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    spacing: 6,
+                                    runSpacing: 2,
+                                    children: [
+                                      Text(
+                                        "L: $lowLimits - H: $highLimits",
+                                        style: TextStyle(fontSize: 12, color: ClientTheme.textLight),
+                                      ),
+                                      Text("|", style: TextStyle(color: ClientTheme.textLight.withOpacity(0.5))),
+                                      Text(
+                                        "Unit: ${channel['Unit'] ?? '-'}",
+                                        style: TextStyle(fontSize: 12, color: ClientTheme.textLight),
+                                      ),
+                                    ],
                                   ),
                                 ],
                               ),
                             ),
-                            const SizedBox(width: 12),
-                            Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                IconButton(
-                                  icon: const Icon(Iconsax.edit, color: ClientTheme.secondaryColor, size: 22),
-                                  tooltip: 'Edit Configuration',
-                                  onPressed: () => _showEditChannelDialog(
-                                    context,
-                                        (updatedData) => _handleChannelUpdate(updatedData),
-                                    channel,
-                                    _inputTypes,
-                                  ),
-                                ),
-                                Checkbox(
-                                  value: isSelected,
-                                  onChanged: (val) {
-                                    setState(() {
-                                      _channelSelection[mapID] = val ?? false;
-                                    });
-                                  },
-                                  activeColor: ClientTheme.primaryColor,
-                                  checkColor: Colors.white,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                                ),
-                              ],
+
+                            // 3. Actions (Edit & Check)
+                            const SizedBox(width: 4),
+                            IconButton(
+                              constraints: const BoxConstraints(),
+                              padding: const EdgeInsets.all(8),
+                              icon: const Icon(Iconsax.edit, color: ClientTheme.secondaryColor, size: 20),
+                              onPressed: () => _showEditChannelDialog(
+                                context,
+                                    (updatedData) => _handleChannelUpdate(updatedData),
+                                channel,
+                                _inputTypes,
+                              ),
+                            ),
+                            Checkbox(
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                              value: isSelected,
+                              onChanged: (val) {
+                                setState(() {
+                                  _channelSelection[mapID] = val ?? false;
+                                });
+                              },
+                              activeColor: ClientTheme.primaryColor,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
                             ),
                           ],
                         ),
                       ),
                     ),
-                  ).animate().fadeIn(duration: 300.ms, delay: (index * 50).ms).slideX(duration: 300.ms, begin: 0.1),
+                  ).animate().fadeIn(duration: 300.ms).slideY(begin: 0.1, end: 0),
                 );
               },
             ),
@@ -574,67 +610,238 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
     );
   }
 
-  // -------------------------------------------------------------
-  // === DETAIL & EDIT DIALOGS (Kept as is, just ensured they work) ===
-  // -------------------------------------------------------------
-
   void _showChannelDetailsDialog(
       BuildContext context,
       Map<String, dynamic> channel,
       List<Map<String, dynamic>> inputTypes,
       ) {
+    // 1. Resolve Input Type Name
     final String inputTypeName = inputTypes.firstWhere(
             (t) => t['InputTypeID'] == channel['ChannelInputType'],
         orElse: () => {'TypeName': 'Unknown'}
     )['TypeName'];
 
-    final List<Map<String, dynamic>> details = [
-      {'label': 'Channel ID', 'value': channel['MapID']?.toString() ?? 'N/A'},
-      {'label': 'Input Type', 'value': inputTypeName},
-      {'label': 'Unit', 'value': channel['Unit'] ?? 'N/A'},
-      {'label': 'Default Selection', 'value': (channel['IsDefaultSelected'] == 1 ? 'Yes' : 'No')},
-      {'label': 'Low Limit (Alarm Min)', 'value': channel['Effective_LowLimits']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'High Limit (Alarm Max)', 'value': channel['Effective_HighLimits']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'Offset', 'value': channel['Effective_Offset']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'Resolution', 'value': channel['Effective_Resolution']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'Low Value (Linear)', 'value': channel['Effective_LowValue']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'High Value (Linear)', 'value': channel['Effective_HighValue']?.toString() ?? 'N/A', 'type': 'effective'},
-      {'label': 'Graph Color (Effective)', 'value': channel['Effective_GraphColor']?.toString() ?? 'N/A', 'type': 'color'},
-      {'label': 'Alarm Color (Effective)', 'value': channel['Effective_AlarmColor']?.toString() ?? 'N/A', 'type': 'color'},
-    ];
+    // 2. Helper to Parse Color safely
+    Color getColor(String? hex) {
+      if (hex == null || hex.isEmpty) return Colors.grey;
+      try {
+        return Color(int.parse('FF${hex.replaceAll('#', '')}', radix: 16));
+      } catch (e) {
+        return Colors.grey;
+      }
+    }
 
+    // 3. Helper to build Read-Only items that look like TextFields
+    Widget buildStyledDetailItem({required String label, required String value}) {
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(label, style: ClientTheme.themeData.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: ClientTheme.textDark)),
+            const SizedBox(height: 4),
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: ClientTheme.background, // Same grey as Edit inputs
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                value,
+                style: ClientTheme.themeData.textTheme.bodyMedium?.copyWith(color: ClientTheme.textDark),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      );
+    }
+
+    // 4. Helper for Colors (styled like the picker)
+    Widget buildColorDetailItem({required String label, required Color color}) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: ClientTheme.themeData.textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: ClientTheme.textDark)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 40, height: 40,
+                decoration: BoxDecoration(
+                    color: color,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: ClientTheme.textLight.withOpacity(0.2), width: 2),
+                    boxShadow: [BoxShadow(color: color.withOpacity(0.3), blurRadius: 4)]
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  "#${color.value.toRadixString(16).substring(2).toUpperCase()}",
+                  style: ClientTheme.themeData.textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.bold, color: ClientTheme.textDark),
+                ),
+              ),
+            ],
+          ),
+        ],
+      );
+    }
 
     showDialog(
       context: context,
-      builder: (context) {
+      builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: ClientTheme.surface,
+          // Mobile Friendly Settings
+          scrollable: true,
+          insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text("Channel Details: ${channel['ChannelName']}",
-              style: ClientTheme.themeData.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.bold)),
-          content: SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildSettingsSectionHeader("General Information"),
-                ...details.sublist(0, 4).map((d) => _buildDetailRow(d['label'] as String, d['value'] as String)),
+          titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
+          contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 24),
 
-                _buildSettingsSectionHeader("Effective Configuration"),
-                ...details.sublist(4, 10).map((d) => _buildDetailRow(d['label'] as String, d['value'] as String)),
-
-                _buildSettingsSectionHeader("Color Settings"),
-                ...details.sublist(10).map((d) => _buildColorDetailRow(d['label'] as String, d['value'] as String)),
-              ],
-            ),
+          title: Text(
+            "Channel Details",
+            style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontSize: 18),
           ),
+
+          content: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _buildSettingsSectionHeader("Channel Identification"),
+              buildStyledDetailItem(label: "Channel Name", value: channel['ChannelName'] ?? 'Unnamed'),
+
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: buildStyledDetailItem(label: "Map ID", value: channel['MapID']?.toString() ?? 'N/A')),
+                  const SizedBox(width: 12),
+                  Expanded(child: buildStyledDetailItem(label: "Unit", value: channel['Unit'] ?? '-')),
+                ],
+              ),
+
+              _buildSettingsSectionHeader("Channel Type & Status"),
+              buildStyledDetailItem(label: "Input Type", value: inputTypeName),
+              buildStyledDetailItem(label: "Default Selected", value: (channel['IsDefaultSelected'] == 1 ? 'Yes' : 'No')),
+
+              _buildSettingsSectionHeader("Alarm Limits & Offset"),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: buildStyledDetailItem(label: "Low Limit", value: channel['Effective_LowLimits']?.toString() ?? 'N/A')),
+                  const SizedBox(width: 12),
+                  Expanded(child: buildStyledDetailItem(label: "High Limit", value: channel['Effective_HighLimits']?.toString() ?? 'N/A')),
+                ],
+              ),
+              buildStyledDetailItem(label: "Offset Correction", value: channel['Effective_Offset']?.toString() ?? 'N/A'),
+
+              _buildSettingsSectionHeader("Linear Conversion"),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: buildStyledDetailItem(label: "Low Value", value: channel['Effective_LowValue']?.toString() ?? 'N/A')),
+                  const SizedBox(width: 12),
+                  Expanded(child: buildStyledDetailItem(label: "High Value", value: channel['Effective_HighValue']?.toString() ?? 'N/A')),
+                ],
+              ),
+              buildStyledDetailItem(label: "Resolution", value: channel['Effective_Resolution']?.toString() ?? 'N/A'),
+
+              _buildSettingsSectionHeader("Appearance"),
+              // Colors Row (Matches Edit Dialog layout)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: buildColorDetailItem(label: "Graph Color", color: getColor(channel['Effective_GraphColor']?.toString()))),
+                  const SizedBox(width: 12),
+                  Expanded(child: buildColorDetailItem(label: "Alarm Color", color: getColor(channel['Effective_AlarmColor']?.toString()))),
+                ],
+              ),
+            ],
+          ),
+
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Close', style: TextStyle(color: ClientTheme.textLight)),
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text("Close", style: TextStyle(color: ClientTheme.textLight)),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                Navigator.of(dialogContext).pop();
+                // Optionally verify logic here if needed
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: ClientTheme.primaryColor,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              child: const Text("OK"),
             ),
           ],
         );
       },
+    );
+  }
+
+  // --- HELPER WIDGETS FOR THIS DIALOG ---
+
+  Widget _buildReadOnlyItem(String label, String value) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ClientTheme.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ClientTheme.textLight.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: ClientTheme.textLight.withOpacity(0.8), fontWeight: FontWeight.w600)),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: ClientTheme.textDark), maxLines: 1, overflow: TextOverflow.ellipsis),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildColorPreview(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: ClientTheme.background,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: ClientTheme.textLight.withOpacity(0.1)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(label, style: TextStyle(fontSize: 11, color: ClientTheme.textLight.withOpacity(0.8), fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Container(
+                width: 24, height: 24,
+                decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.black12, width: 1),
+                    boxShadow: [BoxShadow(color: color.withOpacity(0.4), blurRadius: 4, offset: const Offset(0, 2))]
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  "#${color.value.toRadixString(16).substring(2).toUpperCase()}",
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ],
+          )
+        ],
+      ),
     );
   }
 
@@ -692,106 +899,140 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
       List<Map<String, dynamic>> inputTypes,
       ) {
     Map<String, dynamic> tempChannelData = _mapChannelDataForEdit(channel);
-
     final formKey = GlobalKey<FormState>();
 
     showDialog(
       context: context,
       builder: (dialogContext) {
+        // 1. Detect Screen Size
+        final double screenWidth = MediaQuery.of(dialogContext).size.width;
+        final bool isMobile = screenWidth < 600;
+
         return StatefulBuilder(
           builder: (BuildContext context, StateSetter setState) {
+            Color currentLineColor = Color(int.parse(
+                'FF${tempChannelData['Client_GraphColor']?.toString().replaceAll('#', '') ?? '2563EB'}',
+                radix: 16));
+            Color currentAlarmColor = Color(int.parse(
+                'FF${tempChannelData['Client_AlarmColor']?.toString().replaceAll('#', '') ?? 'FF0000'}',
+                radix: 16));
 
-            Color currentLineColor = Color(int.parse('FF${tempChannelData['Client_GraphColor']?.toString().replaceAll('#', '') ?? '2563EB'}', radix: 16));
-            Color currentAlarmColor = Color(int.parse('FF${tempChannelData['Client_AlarmColor']?.toString().replaceAll('#', '') ?? 'FF0000'}', radix: 16));
-
-            bool isLinearInput = _checkLinearity(tempChannelData['ChannelInputType'], inputTypes);
+            bool isLinearInput =
+            _checkLinearity(tempChannelData['ChannelInputType'], inputTypes);
 
             return AlertDialog(
               backgroundColor: ClientTheme.surface,
+              scrollable: true,
+              // 2. Adjust padding for mobile to maximize space
+              insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 8),
-              contentPadding: const EdgeInsets.all(24),
-              title: Text("Edit Channel: ${tempChannelData['ChannelName']}",
-                  style: ClientTheme.themeData.textTheme.titleLarge),
+              contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 16),
+
+              title: Text(
+                "Edit Channel: ${tempChannelData['ChannelName']}",
+                style: ClientTheme.themeData.textTheme.titleLarge?.copyWith(fontSize: 18),
+              ),
 
               content: Form(
                 key: formKey,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildSettingsSectionHeader("Channel Identification"),
-                      _buildStyledTextFormField(
-                        label: 'Channel Name',
-                        initialValue: tempChannelData['ChannelName']?.toString() ?? '',
-                        defaultValue: 'Channel ${tempChannelData['MapID']}',
-                        onSaved: (v) => tempChannelData['ChannelName'] = v,
-                        isNumeric: false,
-                      ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildSettingsSectionHeader("Channel Identification"),
+                    _buildStyledTextFormField(
+                      label: 'Channel Name',
+                      initialValue: tempChannelData['ChannelName']?.toString() ?? '',
+                      defaultValue: 'Channel ${tempChannelData['MapID']}',
+                      onSaved: (v) => tempChannelData['ChannelName'] = v,
+                      isNumeric: false,
+                    ),
 
-                      _buildSettingsSectionHeader("Channel Type & Limits (Unit: ${tempChannelData['Unit']})"),
+                    _buildSettingsSectionHeader("Channel Type (Unit: ${tempChannelData['Unit']})"),
+                    _buildInputTypeDropdown(
+                      inputTypes: inputTypes,
+                      currentValue: tempChannelData['ChannelInputType'],
+                      onChanged: (newId) {
+                        setState(() {
+                          tempChannelData['ChannelInputType'] = newId;
+                          isLinearInput = _checkLinearity(newId, inputTypes);
+                        });
+                      },
+                    ),
+                    const SizedBox(height: 16),
 
-                      _buildInputTypeDropdown(
-                        inputTypes: inputTypes,
-                        currentValue: tempChannelData['ChannelInputType'],
-                        onChanged: (newId) {
-                          setState(() {
-                            tempChannelData['ChannelInputType'] = newId;
-                            isLinearInput = _checkLinearity(newId, inputTypes);
-                          });
-                        },
+                    _buildSettingsSectionHeader("Alarm Limits & Offset"),
 
-                      ),
-                      const SizedBox(height: 16),
-
-                      _buildStyledTextFormField(
-                        label: 'Low Limit (Alarm Minimum)',
-                        initialValue: tempChannelData['Client_LowLimits']?.toString() ?? '',
-                        defaultValue: tempChannelData['Default_LowLimits']?.toString() ?? 'N/A',
-                        onSaved: (v) => tempChannelData['Client_LowLimits'] = v,
-                      ),
-                      _buildStyledTextFormField(
-                        label: 'High Limit (Alarm Maximum)',
-                        initialValue: tempChannelData['Client_HighLimits']?.toString() ?? '',
-                        defaultValue: tempChannelData['Default_HighLimits']?.toString() ?? 'N/A',
-                        onSaved: (v) => tempChannelData['Client_HighLimits'] = v,
-                      ),
-                      _buildStyledTextFormField(
-                        label: 'Offset',
-                        initialValue: tempChannelData['Client_Offset']?.toString() ?? '',
-                        defaultValue: tempChannelData['Default_Offset']?.toString() ?? 'N/A',
-                        onSaved: (v) => tempChannelData['Client_Offset'] = v,
-                      ),
-
-                      const SizedBox(height: 20),
-
-                      if (isLinearInput) ...[
-                        _buildSettingsSectionHeader("Linear Conversion Settings"),
-
-                        _buildStyledTextFormField(
-                          label: 'Low Value',
-                          initialValue: tempChannelData['Client_LowValue']?.toString() ?? '',
-                          defaultValue: tempChannelData['Default_LowValue']?.toString() ?? 'N/A',
-                          onSaved: (v) => tempChannelData['Client_LowValue'] = v,
+                    // Limits Row (These are small numbers, so Row is fine on mobile)
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Expanded(
+                          child: _buildStyledTextFormField(
+                            label: 'Low Limit',
+                            initialValue: tempChannelData['Client_LowLimits']?.toString() ?? '',
+                            defaultValue: tempChannelData['Default_LowLimits']?.toString() ?? 'N/A',
+                            onSaved: (v) => tempChannelData['Client_LowLimits'] = v,
+                          ),
                         ),
-                        _buildStyledTextFormField(
-                          label: 'High Value',
-                          initialValue: tempChannelData['Client_HighValue']?.toString() ?? '',
-                          defaultValue: tempChannelData['Default_HighValue']?.toString() ?? 'N/A',
-                          onSaved: (v) => tempChannelData['Client_HighValue'] = v,
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _buildStyledTextFormField(
+                            label: 'High Limit',
+                            initialValue: tempChannelData['Client_HighLimits']?.toString() ?? '',
+                            defaultValue: tempChannelData['Default_HighLimits']?.toString() ?? 'N/A',
+                            onSaved: (v) => tempChannelData['Client_HighLimits'] = v,
+                          ),
                         ),
-                        _buildStyledTextFormField(
-                          label: 'Resolution',
-                          initialValue: tempChannelData['Client_Resolution']?.toString() ?? '',
-                          defaultValue: tempChannelData['Default_Resolution']?.toString() ?? 'N/A',
-                          onSaved: (v) => tempChannelData['Client_Resolution'] = v,
-                        ),
-                        const SizedBox(height: 20),
                       ],
+                    ),
+                    _buildStyledTextFormField(
+                      label: 'Offset Correction',
+                      initialValue: tempChannelData['Client_Offset']?.toString() ?? '',
+                      defaultValue: tempChannelData['Default_Offset']?.toString() ?? 'N/A',
+                      onSaved: (v) => tempChannelData['Client_Offset'] = v,
+                    ),
 
-                      _buildSettingsSectionHeader("Color Configuration"),
+                    if (isLinearInput) ...[
+                      const SizedBox(height: 8),
+                      _buildSettingsSectionHeader("Linear Conversion"),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildStyledTextFormField(
+                              label: 'Low Value',
+                              initialValue: tempChannelData['Client_LowValue']?.toString() ?? '',
+                              defaultValue: tempChannelData['Default_LowValue']?.toString() ?? 'N/A',
+                              onSaved: (v) => tempChannelData['Client_LowValue'] = v,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildStyledTextFormField(
+                              label: 'High Value',
+                              initialValue: tempChannelData['Client_HighValue']?.toString() ?? '',
+                              defaultValue: tempChannelData['Default_HighValue']?.toString() ?? 'N/A',
+                              onSaved: (v) => tempChannelData['Client_HighValue'] = v,
+                            ),
+                          ),
+                        ],
+                      ),
+                      _buildStyledTextFormField(
+                        label: 'Resolution',
+                        initialValue: tempChannelData['Client_Resolution']?.toString() ?? '',
+                        defaultValue: tempChannelData['Default_Resolution']?.toString() ?? 'N/A',
+                        onSaved: (v) => tempChannelData['Client_Resolution'] = v,
+                      ),
+                    ],
 
+                    const SizedBox(height: 10),
+                    _buildSettingsSectionHeader("Appearance"),
+
+                    // 3. RESPONSIVE COLOR LAYOUT
+                    if (isMobile) ...[
+                      // MOBILE: Stack Vertically (Fixes Overflow)
                       _buildColorPickerControl(
                         dialogContext,
                         title: "Graph Line Color",
@@ -799,13 +1040,13 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                         onColorSelected: (color) {
                           setState(() {
                             currentLineColor = color;
-                            tempChannelData['Client_GraphColor'] = color.value.toRadixString(16).substring(2).toUpperCase();
+                            tempChannelData['Client_GraphColor'] =
+                                color.value.toRadixString(16).substring(2).toUpperCase();
                           });
                         },
                         defaultHex: tempChannelData['Default_GraphColor'] ?? '2563EB',
                       ),
-                      const SizedBox(height: 12),
-
+                      const SizedBox(height: 16), // Space between stacked items
                       _buildColorPickerControl(
                         dialogContext,
                         title: "Alarm Color",
@@ -813,13 +1054,53 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                         onColorSelected: (color) {
                           setState(() {
                             currentAlarmColor = color;
-                            tempChannelData['Client_AlarmColor'] = color.value.toRadixString(16).substring(2).toUpperCase();
+                            tempChannelData['Client_AlarmColor'] =
+                                color.value.toRadixString(16).substring(2).toUpperCase();
                           });
                         },
                         defaultHex: tempChannelData['Default_AlarmColor'] ?? 'FF0000',
                       ),
-                    ],
-                  ),
+                    ] else ...[
+                      // DESKTOP/TABLET: Side-by-Side (Row)
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Expanded(
+                            child: _buildColorPickerControl(
+                              dialogContext,
+                              title: "Graph Line Color",
+                              currentColor: currentLineColor,
+                              onColorSelected: (color) {
+                                setState(() {
+                                  currentLineColor = color;
+                                  tempChannelData['Client_GraphColor'] =
+                                      color.value.toRadixString(16).substring(2).toUpperCase();
+                                });
+                              },
+                              defaultHex: tempChannelData['Default_GraphColor'] ?? '2563EB',
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: _buildColorPickerControl(
+                              dialogContext,
+                              title: "Alarm Color",
+                              currentColor: currentAlarmColor,
+                              onColorSelected: (color) {
+                                setState(() {
+                                  currentAlarmColor = color;
+                                  tempChannelData['Client_AlarmColor'] =
+                                      color.value.toRadixString(16).substring(2).toUpperCase();
+                                });
+                              },
+                              defaultHex: tempChannelData['Default_AlarmColor'] ?? 'FF0000',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ]
+                  ],
                 ),
               ),
               actions: [
@@ -839,9 +1120,15 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                         'Client_LowLimits': double.tryParse(tempChannelData['Client_LowLimits'] as String? ?? '0.0'),
                         'Client_HighLimits': double.tryParse(tempChannelData['Client_HighLimits'] as String? ?? '100.0'),
                         'Client_Offset': double.tryParse(tempChannelData['Client_Offset'] as String? ?? '0.0'),
-                        'Client_LowValue': isLinearInput ? double.tryParse(tempChannelData['Client_LowValue'] as String? ?? '0.0') : null,
-                        'Client_HighValue': isLinearInput ? double.tryParse(tempChannelData['Client_HighValue'] as String? ?? '0.0') : null,
-                        'Client_Resolution': isLinearInput ? int.tryParse(tempChannelData['Client_Resolution'] as String? ?? '0') : null,
+                        'Client_LowValue': isLinearInput
+                            ? double.tryParse(tempChannelData['Client_LowValue'] as String? ?? '0.0')
+                            : null,
+                        'Client_HighValue': isLinearInput
+                            ? double.tryParse(tempChannelData['Client_HighValue'] as String? ?? '0.0')
+                            : null,
+                        'Client_Resolution': isLinearInput
+                            ? int.tryParse(tempChannelData['Client_Resolution'] as String? ?? '0')
+                            : null,
                         'ChannelInputType': int.tryParse(tempChannelData['ChannelInputType']?.toString() ?? '0') ?? null,
                       });
                     }
@@ -849,8 +1136,9 @@ class _AllChannelConfigScreenState extends State<AllChannelConfigScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: ClientTheme.primaryColor,
                     foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
-                  child: const Text('Save Changes'),
+                  child: const Text('Save'),
                 ),
               ],
             );

@@ -1,4 +1,4 @@
-// lib/screens/download_history_screen.dart
+// lib/ClientScreen/Download/downloadScreen.dart
 
 import 'dart:io';
 import 'package:flutter/material.dart';
@@ -8,14 +8,14 @@ import 'package:open_filex/open_filex.dart';
 import '../../ClinetService/export_service.dart';
 import '../../theme/client_theme.dart';
 
-class DownloadHistoryScreen extends StatefulWidget {
-  const DownloadHistoryScreen({super.key});
+class DownloadScreen extends StatefulWidget {
+  const DownloadScreen({super.key});
 
   @override
-  State<DownloadHistoryScreen> createState() => _DownloadHistoryScreenState();
+  State<DownloadScreen> createState() => _DownloadScreenState();
 }
 
-class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
+class _DownloadScreenState extends State<DownloadScreen> {
   final ExportService _exportService = ExportService();
   final TextEditingController _searchController = TextEditingController();
 
@@ -69,17 +69,8 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
     });
   }
 
-  // NEW: Reset only the date filter
+  // Date hatane ka function
   void _clearDateFilter() {
-    setState(() {
-      _selectedDate = null;
-    });
-    _applyFilters();
-  }
-
-  // NEW: Reset both search and date filters
-  void _clearAllFilters() {
-    _searchController.clear();
     setState(() {
       _selectedDate = null;
     });
@@ -128,9 +119,11 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
     if (delete == true) {
       try {
         await file.delete();
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("File deleted")));
         _loadFiles();
       } catch (e) {
+        if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Error deleting: $e")));
       }
     }
@@ -148,17 +141,26 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildInspiredSearchBar(),
-        Expanded(
-          child: _isLoading
-              ? const Center(child: CircularProgressIndicator())
-              : _filteredFiles.isEmpty
-              ? _buildEmptyState()
-              : _buildFileList(),
-        ),
-      ],
+    return Scaffold(
+      backgroundColor: Colors.grey[50],
+      appBar: AppBar(
+        title: const Text("Generated Reports"),
+        elevation: 0,
+        backgroundColor: Colors.white,
+        foregroundColor: Colors.black,
+      ),
+      body: Column(
+        children: [
+          _buildInspiredSearchBar(),
+          Expanded(
+            child: _isLoading
+                ? const Center(child: CircularProgressIndicator())
+                : _filteredFiles.isEmpty
+                ? _buildEmptyState()
+                : _buildFileList(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -200,17 +202,20 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
                 ),
               ),
             ),
-            // UPDATED: Dynamic Date Icon (Calendar vs Remove)
-            IconButton(
-              onPressed: _selectedDate == null ? _pickDate : _clearDateFilter,
-              icon: Icon(
-                _selectedDate == null ? Iconsax.calendar : Iconsax.calendar_remove,
-                color: _selectedDate != null ? Colors.red : ClientTheme.textLight,
-                size: 20,
-              ),
-              tooltip: _selectedDate == null ? "Select Date" : "Clear Date Filter",
+
+            // Agar date selected hai to "Remove" button dikhega, warna "Calendar"
+            _selectedDate != null
+                ? IconButton(
+              onPressed: _clearDateFilter,
+              icon: const Icon(Iconsax.calendar_remove, color: Colors.red, size: 20),
+              tooltip: "Clear Date Filter",
+            )
+                : IconButton(
+              onPressed: _pickDate,
+              icon: Icon(Iconsax.calendar, color: ClientTheme.textLight, size: 20),
+              tooltip: "Filter by Date",
             ),
-            const SizedBox(width: 4),
+
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
@@ -254,17 +259,14 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
             "Try adjusting your search or date filter.",
             style: TextStyle(color: ClientTheme.textLight),
           ),
-          // NEW: Button to quickly reset everything when no results are found
           if (_selectedDate != null || _searchController.text.isNotEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: TextButton.icon(
-                onPressed: _clearAllFilters,
-                icon: const Icon(Iconsax.refresh, size: 18),
-                label: const Text("Clear All Filters"),
-                style: TextButton.styleFrom(foregroundColor: ClientTheme.primaryColor),
-              ),
-            ),
+            TextButton(
+                onPressed: () {
+                  _searchController.clear();
+                  _clearDateFilter();
+                },
+                child: const Text("Clear All Filters", style: TextStyle(color: Colors.red))
+            )
         ],
       ),
     );
@@ -281,6 +283,7 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
 
         final isPdf = name.toLowerCase().endsWith(".pdf");
         final isExcel = name.toLowerCase().endsWith(".xlsx");
+        final isDoc = name.toLowerCase().endsWith(".html") || name.toLowerCase().endsWith(".doc");
 
         return Card(
           elevation: 2,
@@ -290,7 +293,7 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
             side: BorderSide(color: ClientTheme.textLight.withOpacity(0.05)),
           ),
           child: ListTile(
-            onLongPress: () => _confirmDelete(file),
+            onLongPress: () => _confirmDelete(file), // DELETE ON LONG PRESS
             onTap: () => _openFile(file.path),
             leading: Container(
               padding: const EdgeInsets.all(8),
@@ -299,8 +302,8 @@ class _DownloadHistoryScreenState extends State<DownloadHistoryScreen> {
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Icon(
-                isPdf ? Iconsax.document : (isExcel ? Iconsax.document_text : Iconsax.document_code),
-                color: isPdf ? Colors.red : (isExcel ? Colors.green : Colors.blue),
+                isPdf ? Iconsax.document : (isExcel ? Iconsax.document_text : (isDoc ? Iconsax.document_text_1 : Iconsax.document_code)),
+                color: isPdf ? Colors.red : (isExcel ? Colors.green : (isDoc ? Colors.indigo : Colors.blue)),
                 size: 20,
               ),
             ),

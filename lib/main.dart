@@ -9,57 +9,53 @@ import 'theme/app_theme.dart';
 // Import the new Routes file
 import 'routes/app_routes.dart';
 
-void main() {
+void main() async {
+  // Required to interact with native code (SharedPreferences) before runApp
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Pre-fetch the initial route based on session
+  String initialRoute = AppRoutes.login;
+  String? role;
+  Map<String, dynamic>? userData;
+
+  if (await SessionManager.hasSession()) {
+    role = await SessionManager.getRole();
+    userData = await SessionManager.getUserData();
+
+    if (role == 'Admin') {
+      initialRoute = AppRoutes.admin;
+    } else if (role == 'Client') {
+      initialRoute = AppRoutes.client;
+    }
+  }
+
   runApp(
     MultiProvider(
       providers: [
-        ChangeNotifierProvider(create: (_) => AdminProvider()),
-        ChangeNotifierProvider(create: (_) => ClientProvider()),
+        ChangeNotifierProvider(create: (_) {
+          final provider = AdminProvider();
+          if (role == 'Admin' && userData != null) {
+            provider.setAdminData(userData);
+          }
+          return provider;
+        }),
+        ChangeNotifierProvider(create: (_) {
+          final provider = ClientProvider();
+          if (role == 'Client' && userData != null) {
+            provider.setClientData(userData);
+          }
+          return provider;
+        }),
       ],
-      child: const CountronApp(),
+      child: CountronApp(initialRoute: initialRoute),
     ),
   );
 }
 
-class CountronApp extends StatefulWidget {
-  const CountronApp({super.key});
+class CountronApp extends StatelessWidget {
+  final String initialRoute;
 
-  @override
-  State<CountronApp> createState() => _CountronAppState();
-}
-
-class _CountronAppState extends State<CountronApp> {
-  String _initialRoute = AppRoutes.login;
-
-  @override
-  void initState() {
-    super.initState();
-    _checkSessionRestoration();
-  }
-
-  void _checkSessionRestoration() {
-    if (SessionManager.hasSession()) {
-      final role = SessionManager.getRole();
-      final userData = SessionManager.getUserData();
-
-      // Restore Providers
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (role == 'Admin') {
-          Provider.of<AdminProvider>(context, listen: false).setAdminData(userData);
-          _setRoute(AppRoutes.admin);
-        } else if (role == 'Client') {
-          Provider.of<ClientProvider>(context, listen: false).setClientData(userData);
-          _setRoute(AppRoutes.client);
-        }
-      });
-    }
-  }
-
-  void _setRoute(String route) {
-    setState(() {
-      _initialRoute = route;
-    });
-  }
+  const CountronApp({super.key, required this.initialRoute});
 
   @override
   Widget build(BuildContext context) {
@@ -71,7 +67,7 @@ class _CountronAppState extends State<CountronApp> {
       themeMode: ThemeMode.light,
 
       // --- USE THE ROUTE MAP ---
-      initialRoute: _initialRoute,
+      initialRoute: initialRoute,
       routes: AppRoutes.getRoutes(),
     );
   }

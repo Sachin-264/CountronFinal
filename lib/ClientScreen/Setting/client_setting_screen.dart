@@ -83,15 +83,23 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
   Future<void> _fetchDeviceSettings() async {
     final provider = Provider.of<ClientProvider>(context, listen: false);
     if (provider.selectedDeviceRecNo == null) return;
+
     setState(() => _isLoading = true);
-    final data = await _settingsService.fetchSettings(provider.selectedDeviceRecNo!);
+
+    // Fetch data from service
+    final rawData = await _settingsService.fetchSettings(provider.selectedDeviceRecNo!);
+
     if (mounted) {
       setState(() {
         _isLoading = false;
-        if (data != null) {
-          _reportCompanyController.text = data['ClientCompanyName'] ?? '';
-          _reportAddressController.text = data['ClientAddress'] ?? '';
-          _currentReportLogoPath = data['Logo'];
+        if (rawData != null) {
+          // 🛠️ FIX: Check if data is wrapped inside a "data" key
+          final settings = rawData.containsKey('data') ? rawData['data'] : rawData;
+
+          // Now access the fields from the correct map
+          _reportCompanyController.text = settings['ClientCompanyName'] ?? '';
+          _reportAddressController.text = settings['ClientAddress'] ?? '';
+          _currentReportLogoPath = settings['Logo'];
         }
       });
     }
@@ -543,7 +551,7 @@ class _ClientSettingsScreenState extends State<ClientSettingsScreen> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("Alarm Configuration", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ClientTheme.textDark)),
+                  Text("Alarm Config", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ClientTheme.textDark)),
                   if(isDesktop) Text("Send emails when thresholds are crossed.", style: TextStyle(fontSize: 11, color: Colors.grey)),
                 ],
               ),

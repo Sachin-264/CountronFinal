@@ -416,51 +416,50 @@ class _LoginScreenState extends State<LoginScreen> {
   Widget _buildMobileLayout(Size size) {
     return Stack(
       children: [
-        Positioned(
-          top: 0, left: 0, right: 0, height: size.height * 0.45,
-          child: Container(
-            color: Colors.transparent,
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                Positioned(top: -50, left: -50, child: _buildGlassCircle(150, color: AppTheme.primaryBlue.withOpacity(0.1))),
-                Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    const SizedBox(height: 20),
-                    SizedBox(
-                      height: 200, width: 200,
-                      child: Lottie.asset('assets/login.json', fit: BoxFit.contain),
-                    ).animate().fadeIn(duration: 600.ms),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
+        // 1. Logo - Fixed at Top (Thoda neeche, 60px par)
         const Positioned(
-          top: 30, left: 32,
-          child: _CountronLogo(size: 36),
+          top: 60,
+          left: 24,
+          child: _CountronLogo(size: 42),
         ),
-        Positioned(
-          top: size.height * 0.40, left: 0, right: 0, bottom: 0,
-          child: Container(
-            decoration: const BoxDecoration(
+
+        // 2. Login Card - "Center" hata kar padding se neeche shift kiya
+        SizedBox.expand(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            // Top Padding 160 kar di taaki card neeche aa jaye
+            padding: const EdgeInsets.fromLTRB(24, 140, 24, 30),
+            child: Container(
+              decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.only(topLeft: Radius.circular(32), topRight: Radius.circular(32)),
-                boxShadow: [BoxShadow(color: Colors.black12, blurRadius: 20, offset: Offset(0, -5))]
-            ),
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(32, 40, 32, 32),
-              child: _buildLoginFormContent(),
-            ),
-          ).animate().slideY(begin: 0.2, end: 0, duration: 600.ms, curve: Curves.easeOutQuint),
+                borderRadius: BorderRadius.circular(30),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.08),
+                    blurRadius: 40,
+                    offset: const Offset(0, 20),
+                  ),
+                ],
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(30),
+                child: BackdropFilter(
+                  filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(28, 40, 28, 32),
+                    // isMobile: true zaroor pass karein
+                    child: _buildLoginFormContent(isMobile: true),
+                  ),
+                ),
+              ),
+            ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1, end: 0, duration: 600.ms),
+          ),
         ),
       ],
     );
   }
-
-  Widget _buildLoginFormContent() {
+// Added optional parameter isMobile
+  Widget _buildLoginFormContent({bool isMobile = false}) {
     int delay = 200;
 
     return Column(
@@ -478,6 +477,9 @@ class _LoginScreenState extends State<LoginScreen> {
           label: "Username",
           icon: Iconsax.user,
           delay: (delay += 100),
+          // Add Hints
+          autofillHints: const [AutofillHints.username],
+          textInputAction: TextInputAction.next,
         ),
         const SizedBox(height: 24),
         _buildAnimatedTextField(
@@ -486,34 +488,73 @@ class _LoginScreenState extends State<LoginScreen> {
           icon: Iconsax.lock,
           isPassword: true,
           delay: (delay += 100),
+          // Add Hints & Submit Action
+          autofillHints: const [AutofillHints.password],
+          textInputAction: TextInputAction.done,
+          // Trigger login when user hits "Enter" or "Done" on keyboard
+          onSubmitted: _login,
         ),
         const SizedBox(height: 16),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Row(
-              children: [
-                Transform.scale(
-                  scale: 0.9,
-                  child: Checkbox(
-                    value: _rememberMe,
-                    activeColor: AppTheme.primaryBlue,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-                    onChanged: (val) => setState(() => _rememberMe = val!),
-                  ),
+
+        // --- CHANGED SECTION ---
+        if (isMobile) ...[
+          // Mobile Layout: Vertical Stack
+          Row(
+            children: [
+              Transform.scale(
+                scale: 0.9,
+                child: Checkbox(
+                  value: _rememberMe,
+                  activeColor: AppTheme.primaryBlue,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                  onChanged: (val) => setState(() => _rememberMe = val!),
                 ),
-                Text("Remember me", style: AppTheme.bodyText1.copyWith(fontSize: 13)),
-              ],
-            ),
-            TextButton(
+              ),
+              Text("Remember me", style: AppTheme.bodyText1.copyWith(fontSize: 13)),
+            ],
+          ),
+          // Forgot Password Moved Below
+          Align(
+            alignment: Alignment.centerRight, // Aligns to right (standard mobile UX)
+            child: TextButton(
               onPressed: _showForgotPasswordDialog,
               child: Text(
                 "Forgot Password?",
                 style: AppTheme.labelText.copyWith(color: AppTheme.primaryBlue, fontSize: 13),
               ),
             ),
-          ],
-        ).animate().fadeIn(delay: (delay += 100).ms),
+          ),
+        ] else ...[
+          // Desktop Layout: Side by Side (Original)
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Transform.scale(
+                    scale: 0.9,
+                    child: Checkbox(
+                      value: _rememberMe,
+                      activeColor: AppTheme.primaryBlue,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                      onChanged: (val) => setState(() => _rememberMe = val!),
+                    ),
+                  ),
+                  Text("Remember me", style: AppTheme.bodyText1.copyWith(fontSize: 13)),
+                ],
+              ),
+              TextButton(
+                onPressed: _showForgotPasswordDialog,
+                child: Text(
+                  "Forgot Password?",
+                  style: AppTheme.labelText.copyWith(color: AppTheme.primaryBlue, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
+        ],
+        // --- END CHANGED SECTION ---
+
         const SizedBox(height: 32),
         if (_errorMessage != null)
           Container(
@@ -576,6 +617,10 @@ class _LoginScreenState extends State<LoginScreen> {
     required IconData icon,
     bool isPassword = false,
     required int delay,
+    // [ADD THESE PARAMETERS]
+    Iterable<String>? autofillHints,
+    TextInputAction? textInputAction,
+    VoidCallback? onSubmitted,
   }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -591,21 +636,36 @@ class _LoginScreenState extends State<LoginScreen> {
           child: TextField(
             controller: controller,
             obscureText: isPassword && _isObscure,
-            style: AppTheme.bodyText1.copyWith(color: AppTheme.darkText, fontWeight: FontWeight.w600, fontSize: 15),
+            // [ADD THESE PROPERTIES]
+            autofillHints: autofillHints,
+            textInputAction: textInputAction,
+            onSubmitted: (_) => onSubmitted?.call(),
+            keyboardType: isPassword ? TextInputType.visiblePassword : TextInputType.emailAddress,
+            // -----------------------
+            style: AppTheme.bodyText1.copyWith(
+                color: AppTheme.darkText, fontWeight: FontWeight.w600, fontSize: 15),
             decoration: InputDecoration(
               hintText: "Enter your ${label.toLowerCase()}",
-              hintStyle: AppTheme.bodyText1.copyWith(color: Colors.grey[400], fontSize: 14, fontWeight: FontWeight.w400),
+              hintStyle: AppTheme.bodyText1.copyWith(
+                  color: Colors.grey[400], fontSize: 14, fontWeight: FontWeight.w400),
               prefixIcon: Icon(icon, color: Colors.grey[500], size: 22),
               suffixIcon: isPassword
                   ? IconButton(
-                icon: Icon(_isObscure ? Iconsax.eye_slash : Iconsax.eye, color: Colors.grey[500], size: 20),
+                icon: Icon(_isObscure ? Iconsax.eye_slash : Iconsax.eye,
+                    color: Colors.grey[500], size: 20),
                 onPressed: () => setState(() => _isObscure = !_isObscure),
               )
                   : null,
               border: InputBorder.none,
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide(color: Colors.grey.shade200)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: const BorderSide(color: AppTheme.primaryBlue, width: 1.5)),
+              contentPadding:
+              const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+              enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: BorderSide(color: Colors.grey.shade200)),
+              focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  borderSide: const BorderSide(
+                      color: AppTheme.primaryBlue, width: 1.5)),
             ),
           ),
         ),
@@ -652,7 +712,7 @@ class _CountronLogo extends StatelessWidget {
       textAlign: TextAlign.center,
       text: TextSpan(
         style: GoogleFonts.greatVibes(
-          textStyle: AppTheme.logoStyle.copyWith(fontSize: size, fontWeight: FontWeight.normal),
+          textStyle: AppTheme.logoStyle.copyWith(fontSize: size, fontWeight: FontWeight.bold),
         ),
         children: const [
           TextSpan(text: 'Count', style: TextStyle(color: AppTheme.primaryBlue)),

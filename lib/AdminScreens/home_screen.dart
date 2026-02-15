@@ -8,6 +8,7 @@ import '../theme/app_theme.dart';
 import '../widgets/add_channel.dart';
 import '../widgets/add_client_dialog.dart';
 import '../widgets/successscreen.dart';
+import 'ActivityHistoryScreen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -211,9 +212,24 @@ class _HomeScreenState extends State<HomeScreen> {
                 'Recent Activity',
                 style: theme.textTheme.titleLarge,
               ),
+              // Inside Widget _buildRecentActivity in home_screen.dart
+
               TextButton(
-                onPressed: () {},
-                child: const Text('View All'),
+                onPressed: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => ActivityHistoryScreen(
+                        recentClients: _recentClients,
+                        recentDevices: _recentDevices,
+                      ),
+                    ),
+                  );
+                },
+                child: const Text(
+                  'View All',
+                  style: TextStyle(fontWeight: FontWeight.bold),
+                ),
               ),
             ],
           ),
