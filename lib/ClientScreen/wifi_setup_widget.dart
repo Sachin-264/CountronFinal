@@ -1,4 +1,11 @@
 // [UPDATE] lib/ClientScreen/wifi_setup_widget.dart
+// FIXES:
+//  - Batch Saving: Sends all 5 commands at once on Final Save
+//  - Waits for WIFILIST::OK after sending 5 Wi-Fi configs
+//  - Sends set_ALLDONE and waits for ALLDONE::OK before disconnecting
+//  - Fixed password formatting typo (pass= instead of pass==)
+//  - Empty slots explicitly get 'NODEF'
+//  - UI updates locally instantly
 
 import 'dart:async';
 import 'dart:convert';
@@ -10,12 +17,24 @@ import 'package:iconsax_flutter/iconsax_flutter.dart';
 import 'package:wifi_iot/wifi_iot.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_animate/flutter_animate.dart';
-import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../provider/client_provider.dart';
 import '../../theme/client_theme.dart';
 import '../widgets/constants.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// DATA MODEL
+// ─────────────────────────────────────────────────────────────────────────────
+class _SavedWifi {
+  int slot;   // 1-5 (Updated dynamically in UI)
+  String ssid;
+  String pass;
+  _SavedWifi({required this.slot, required this.ssid, required this.pass});
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN WIDGET
+// ─────────────────────────────────────────────────────────────────────────────
 class WifiSetupWidget extends StatefulWidget {
   final VoidCallback onConnected;
   const WifiSetupWidget({super.key, required this.onConnected});
@@ -25,49 +44,54 @@ class WifiSetupWidget extends StatefulWidget {
 }
 
 class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingObserver {
-  // --- Wi-Fi State ---
+
+  // ── Flow step ──────────────────────────────────────────────────────────────
+  int _flowStep = 0; // 0=Scan, 1=DeviceID, 2=Config
+
+  // ── Wi-Fi scan state ───────────────────────────────────────────────────────
   List<WifiNetwork> _networks = [];
   String? _currentSSID;
   bool _isEnabled = false;
   bool _isScanning = false;
-  bool _isCheckingInternet = false;
   Map<String, String> _savedPasswords = {};
   Timer? _wifiMonitorTimer;
 
-  // --- Socket / Config State ---
-  bool _isConfiguring = false;
+  // ── Socket state ───────────────────────────────────────────────────────────
   Socket? _socket;
   final String _deviceIp = '192.168.4.1';
   final int _devicePort = 1336;
-
-  // Robustness Timers
   Timer? _keepAliveTimer;
   bool _isSocketConnected = false;
+  bool _isFetchingId = false;
 
-  // --- UI Controllers ---
-  final TextEditingController _deviceIdController = TextEditingController();
-  final TextEditingController _getCmdController = TextEditingController();
-  final ScrollController _logScrollController = ScrollController();
+  // ── Async Completers for Save Flow ─────────────────────────────────────────
+  Completer<void>? _wifiListOkCompleter;
+  Completer<void>? _allDoneOkCompleter;
 
-  List<String> _logs = [];
+  // ── Device ID ──────────────────────────────────────────────────────────────
+  String _deviceId = '';
+
+  // ── Saved WiFi list (from device) ─────────────────────────────────────────
+  final List<_SavedWifi> _savedWifiList = [];
+  bool _isFetchingWifi = false;
+  bool _isSyncing = false;
 
   @override
   void initState() {
     super.initState();
+    print('🔵 [WiFi-Setup] Widget Initialized');
     WidgetsBinding.instance.addObserver(this);
-    _loadSavedCredentials();
+    _loadSavedPasswords();
     _initializeWifi();
   }
 
   @override
   void dispose() {
+    print('⚫ [WiFi-Setup] Disposing Widget');
     WidgetsBinding.instance.removeObserver(this);
-    _stopSocketHeartbeat();
-    _disconnectSocket();
+    _keepAliveTimer?.cancel();
+    _socket?.destroy();
     _wifiMonitorTimer?.cancel();
-    _deviceIdController.dispose();
-    _getCmdController.dispose();
-    _logScrollController.dispose();
     super.dispose();
   }
 
@@ -78,14 +102,13 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     }
   }
 
-  // ==========================================
-  //            WI-FI LOGIC
-  // ==========================================
+  // ══════════════════════════════════════════════════════════════════════════
+  //  WI-FI SCAN HELPERS
+  // ══════════════════════════════════════════════════════════════════════════
 
-  Future<void> _loadSavedCredentials() async {
+  Future<void> _loadSavedPasswords() async {
     final prefs = await SharedPreferences.getInstance();
-    final keys = prefs.getKeys();
-    for (String key in keys) {
+    for (final key in prefs.getKeys()) {
       if (key.startsWith('wifi_pw_')) {
         _savedPasswords[key.replaceFirst('wifi_pw_', '')] = prefs.getString(key) ?? '';
       }
@@ -93,21 +116,17 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
   }
 
   Future<void> _initializeWifi() async {
-    await _checkWifiStatus();
-    if (_isEnabled) {
-      await _getCurrentConnectedWifi();
+    bool enabled = await WiFiForIoTPlugin.isEnabled();
+    if (mounted) setState(() => _isEnabled = enabled);
+    if (enabled) {
+      await _getCurrentSSID();
       await _scanWifi();
-      _startWifiMonitoring();
+      _startWifiMonitor();
     }
   }
 
-  Future<void> _checkWifiStatus() async {
-    bool isEnabled = await WiFiForIoTPlugin.isEnabled();
-    if (mounted) setState(() => _isEnabled = isEnabled);
-  }
-
-  Future<void> _getCurrentConnectedWifi() async {
-    String? ssid = await WiFiForIoTPlugin.getSSID();
+  Future<void> _getCurrentSSID() async {
+    final ssid = await WiFiForIoTPlugin.getSSID();
     if (mounted) setState(() => _currentSSID = (ssid == '<unknown ssid>' ? null : ssid));
   }
 
@@ -115,34 +134,43 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     if (!mounted) return;
     setState(() => _isScanning = true);
     try {
-      List<WifiNetwork> htResult = await WiFiForIoTPlugin.loadWifiList();
-      htResult.sort((a, b) {
+      List<WifiNetwork> results = await WiFiForIoTPlugin.loadWifiList();
+      results.sort((a, b) {
         if (a.ssid == _currentSSID) return -1;
         if (b.ssid == _currentSSID) return 1;
         return (b.level ?? 0).compareTo(a.level ?? 0);
       });
-
-      if (mounted) setState(() => _networks = htResult);
+      if (mounted) setState(() => _networks = results);
     } catch (e) {
-      debugPrint("SCAN ERROR: $e");
+      print('❌ [WiFi-Setup] SCAN ERROR: $e');
     } finally {
       if (mounted) setState(() => _isScanning = false);
     }
   }
 
-  void _handleNetworkTap(WifiNetwork network) {
-    final String ssid = network.ssid ?? "Unknown";
+  void _startWifiMonitor() {
+    _wifiMonitorTimer?.cancel();
+    _wifiMonitorTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
+      if (!_isEnabled) return;
+      final ssid = await WiFiForIoTPlugin.getSSID();
+      if (ssid != _currentSSID && mounted) _getCurrentSSID();
+    });
+  }
 
+  // ══════════════════════════════════════════════════════════════════════════
+  //  CONNECT TO HOTSPOT
+  // ══════════════════════════════════════════════════════════════════════════
+
+  void _handleNetworkTap(WifiNetwork net) {
+    final ssid = net.ssid ?? 'Unknown';
     if (ssid == _currentSSID) {
-      _startConfigurationMode();
+      _enterConfigMode();
       return;
     }
-
-    bool isOpen = network.capabilities?.toUpperCase().contains("WPA") == false &&
-        network.capabilities?.toUpperCase().contains("WEP") == false;
-
+    final isOpen = !(net.capabilities?.toUpperCase().contains('WPA') == true ||
+        net.capabilities?.toUpperCase().contains('WEP') == true);
     if (isOpen) {
-      _connectToWifi(ssid, "", security: NetworkSecurity.NONE);
+      _connectToWifi(ssid, '', security: NetworkSecurity.NONE);
     } else if (_savedPasswords.containsKey(ssid)) {
       _connectToWifi(ssid, _savedPasswords[ssid]!, security: NetworkSecurity.WPA);
     } else {
@@ -150,16 +178,14 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     }
   }
 
-  Future<void> _connectToWifi(String ssid, String password, {NetworkSecurity security = NetworkSecurity.WPA}) async {
+  Future<void> _connectToWifi(String ssid, String password,
+      {NetworkSecurity security = NetworkSecurity.WPA}) async {
     try {
       await WiFiForIoTPlugin.disconnect();
-      bool result = await WiFiForIoTPlugin.connect(
-        ssid,
-        password: password.isEmpty ? null : password,
-        security: security,
-        joinOnce: true,
-      );
-
+      bool result = await WiFiForIoTPlugin.connect(ssid,
+          password: password.isEmpty ? null : password,
+          security: security,
+          joinOnce: true);
       if (result) {
         if (password.isNotEmpty) {
           final prefs = await SharedPreferences.getInstance();
@@ -169,335 +195,440 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
         await WiFiForIoTPlugin.forceWifiUsage(true);
         await Future.delayed(const Duration(seconds: 3));
         await _initializeWifi();
-        _startConfigurationMode();
+        _enterConfigMode();
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Connection Failed: $e")));
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Connection Failed: $e')));
     }
   }
 
-  void _startWifiMonitoring() {
-    _wifiMonitorTimer?.cancel();
-    _wifiMonitorTimer = Timer.periodic(const Duration(seconds: 5), (timer) async {
-      if (!_isEnabled) return;
-      String? ssid = await WiFiForIoTPlugin.getSSID();
-      if (ssid != _currentSSID && mounted) {
-        _getCurrentConnectedWifi();
-      }
-    });
-  }
+  // ══════════════════════════════════════════════════════════════════════════
+  //  SOCKET & PARSING
+  // ══════════════════════════════════════════════════════════════════════════
 
-  // ==========================================
-  //        ROBUST SOCKET LOGIC (UPDATED)
-  // ==========================================
-
-  void _startConfigurationMode() {
-    setState(() {
-      _isConfiguring = true;
-      _logs.clear();
-      _addLog("Entering Configuration Mode...");
-    });
-    // Start the connection loop
-    _initSocketConnection();
-  }
-
-  Future<void> _initSocketConnection() async {
-    // If already connected, don't reconnect
-    if (_socket != null) return;
-
-    _addLog("Attempting to connect to $_deviceIp:$_devicePort...");
-    print("DEBUG: Connecting to $_deviceIp:$_devicePort");
-
-    try {
-      _socket = await Socket.connect(_deviceIp, _devicePort, timeout: const Duration(seconds: 5));
-
-      setState(() => _isSocketConnected = true);
-      _addLog("CONNECTED");
-      print("DEBUG: Socket Connected");
-
-      // Send initial Keep Alive immediately
-      _sendCommand("KEEP_ALIVE");
-      _startSocketHeartbeat();
-
-      // Listen for data
-      _socket!.listen(
-            (Uint8List data) {
-          // Use allowMalformed to handle garbage characters without crashing
-          final response = utf8.decode(data, allowMalformed: true).trim();
-          print("DEBUG: Received: $response");
-
-          // Log it properly
-          if (response.isNotEmpty) {
-            // Handle multiple lines if they come in one packet
-            final lines = response.split('\n');
-            for (var line in lines) {
-              if (line.trim().isNotEmpty) {
-                _addLog("Received: \"${line.trim()}\"");
-                _handleSocketResponse(line.trim());
-              }
-            }
-          }
-        },
-        onError: (error) {
-          _addLog("Socket Error: $error");
-          print("DEBUG: Socket Error: $error");
-          _handleDisconnection();
-        },
-        onDone: () {
-          _addLog("Socket Closed by Server");
-          print("DEBUG: Socket Closed by Server");
-          _handleDisconnection();
-        },
-      );
-
-      // Run the full command sequence
-      await _runAutoCommands();
-
-    } catch (e) {
-      _addLog("Connection Failed: $e");
-      print("DEBUG: Connection Failed: $e");
-      setState(() => _isSocketConnected = false);
-      // Retry logic could go here if desired
-    }
-  }
-
-  void _handleDisconnection() {
-    setState(() => _isSocketConnected = false);
-    _stopSocketHeartbeat();
-    _socket?.destroy();
-    _socket = null;
-    _addLog("Disconnected. Tap Refresh to retry.");
-  }
-
-  void _startSocketHeartbeat() {
-    _stopSocketHeartbeat();
-    // Send KEEP_ALIVE every 10 seconds to keep connection robust
-    _keepAliveTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
-      if (_socket != null && _isSocketConnected) {
-        _sendCommand("KEEP_ALIVE");
-      }
-    });
-  }
-
-  void _stopSocketHeartbeat() {
-    _keepAliveTimer?.cancel();
-    _keepAliveTimer = null;
-  }
-
-  void _disconnectSocket() {
-    _stopSocketHeartbeat();
-    _socket?.destroy();
-    _socket = null;
-    setState(() => _isSocketConnected = false);
-  }
-
-  // Parses response for UI updates (like Device ID)
-  void _handleSocketResponse(String response) {
-    if (response.contains("DEVICEID::")) {
-      final parts = response.split("::");
-      if (parts.length > 1) {
-        final id = parts[1].trim();
-        setState(() {
-          _deviceIdController.text = id;
-        });
-        print("DEBUG: Parsed Device ID: $id");
-      }
-    }
-  }
-
-  Future<void> _sendCommand(String cmd) async {
-    if (_socket == null) {
-      _addLog("Error: Not connected");
+  void _enterConfigMode() {
+    if (_deviceId.isNotEmpty && _flowStep >= 1) {
+      setState(() { _flowStep = 1; });
+      _connectSocket();
       return;
     }
+    setState(() { _flowStep = 1; _isFetchingId = true; _deviceId = ''; });
+    _connectSocket();
+  }
+
+  Future<void> _connectSocket() async {
+    if (_socket != null) return;
     try {
-      _addLog("Message Send: $cmd");
-      print("DEBUG: Message Send: $cmd");
-      _socket!.write("$cmd\r\n"); // \r\n is standard for many IoT devices
+      _socket = await Socket.connect(_deviceIp, _devicePort, timeout: const Duration(seconds: 5));
+      if (mounted) setState(() => _isSocketConnected = true);
+      _startHeartbeat();
+
+      _socket!.listen(
+            (Uint8List data) {
+          final text = utf8.decode(data, allowMalformed: true).trim();
+          for (final line in text.split('\n')) {
+            if (line.trim().isNotEmpty) _handleResponse(line.trim());
+          }
+        },
+        onError: (_) => _onDisconnect(),
+        onDone: _onDisconnect,
+      );
+      await _sendCmd('get_DEVICEID');
     } catch (e) {
-      _addLog("Send Error: $e");
-      print("DEBUG: Send Error: $e");
-      _handleDisconnection();
+      if (mounted) setState(() { _isSocketConnected = false; _isFetchingId = false; });
     }
   }
 
-  // Matches the exact log sequence provided by user
-  Future<void> _runAutoCommands() async {
-    final cmds = [
-      "get_SENSORID",
-      "get_JSON_SERVER_IP",
-      "get_STARTUP_IP",
-      "get_IS_JSON",
-      "get_DEVICEID",
-      "set_DATETIME::${DateFormat('yyyy-MM-dd HH:mm:ss').format(DateTime.now())}",
-      "get_IS_ETH",
-      "get_ETHERNET_MACID",
-      "get_WIFILIST",
-      "get_VERSION",
-      "get_OPC_SENSORID",
-      "get_IS_HTTPS",
-      "get_IS_WIFI_ALWAYS_ON",
-      "get_TEMPERATURE",
-      "get_DATACHECK",
-      "get_DEVICE_TYPE",
-      "get_HUMIDITY",
-      "get_INTERVAL",
-      "get_AQITYPE",
-      "get_LUX",
-      "get_BAND_L",
-      "get_BAND_H",
-      "get_SENSID_NO2",
-      "get_SENSID_O3",
-      "get_SENSID_SO2",
-      "get_SENSID_CO",
-      "get_NOISE",
-      "get_PORT",
-    ];
+  void _onDisconnect() {
+    _keepAliveTimer?.cancel();
+    _socket?.destroy();
+    _socket = null;
+    if (mounted) setState(() { _isSocketConnected = false; _isFetchingId = false; _isFetchingWifi = false; });
+  }
 
-    print("DEBUG: Starting Auto Command Sequence (${cmds.length} commands)");
+  void _startHeartbeat() {
+    _keepAliveTimer?.cancel();
+    _keepAliveTimer = Timer.periodic(const Duration(seconds: 10), (_) {
+      if (_socket != null && _isSocketConnected) _sendCmd('KEEP_ALIVE');
+    });
+  }
 
-    for (var cmd in cmds) {
-      if (_socket == null) {
-        print("DEBUG: Sequence aborted - Socket null");
-        break;
-      }
-
-      await _sendCommand(cmd);
-      // Wait a bit between commands so we don't flood the microcontroller
-      await Future.delayed(const Duration(milliseconds: 350));
+  Future<void> _sendCmd(String cmd) async {
+    if (_socket == null) return;
+    try {
+      _socket!.write('$cmd\r\n');
+    } catch (e) {
+      _onDisconnect();
     }
-    _addLog("Auto Sequence Complete.");
-    print("DEBUG: Auto Sequence Complete.");
   }
 
-  void _addLog(String msg) {
-    if (!mounted) return;
-    setState(() {
-      _logs.add("[${DateFormat('HH:mm:ss').format(DateTime.now())}] $msg");
-    });
-    // Auto-scroll to bottom
-    Future.delayed(const Duration(milliseconds: 100), () {
-      if (_logScrollController.hasClients) {
-        _logScrollController.animateTo(
-          _logScrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
+  void _handleResponse(String line) {
+    print('📩 [RECV]: $line');
+
+    if (line.contains('DEVICEID::')) {
+      final id = line.split('::').last.trim();
+      if (_deviceId == id) return;
+      if (mounted) setState(() { _deviceId = id; _isFetchingId = false; });
+      return;
+    }
+
+    if (line.contains('WIFILIST::OK')) {
+      if (_wifiListOkCompleter != null && !_wifiListOkCompleter!.isCompleted) {
+        print('✅ [RECV]: Received WIFILIST::OK');
+        _wifiListOkCompleter!.complete();
       }
-    });
+      return;
+    }
+
+    if (line.contains('ALLDONE::OK')) {
+      if (_allDoneOkCompleter != null && !_allDoneOkCompleter!.isCompleted) {
+        print('✅ [RECV]: Received ALLDONE::OK');
+        _allDoneOkCompleter!.complete();
+      }
+      return;
+    }
+
+    if (line.startsWith('WIFILIST::')) {
+      final rawList = line.replaceFirst('WIFILIST::', '');
+      final regex = RegExp(r'ssid=(.*?);pass==?(.*?);');
+      final matches = regex.allMatches(rawList);
+
+      final List<_SavedWifi> parsedList = [];
+      int slotCounter = 1;
+
+      for (final match in matches) {
+        if (slotCounter > 5) break;
+        String ssid = match.group(1) ?? '';
+        String pass = match.group(2) ?? '';
+
+        if (ssid.isNotEmpty && ssid != 'NODEF') {
+          parsedList.add(_SavedWifi(slot: slotCounter, ssid: ssid, pass: pass));
+          slotCounter++; // Only increment slot if it's a valid network
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _savedWifiList.clear();
+          _savedWifiList.addAll(parsedList);
+          _isFetchingWifi = false;
+        });
+        print('✅ Parsed ${_savedWifiList.length} valid networks.');
+      }
+      return;
+    }
   }
 
-  // ==========================================
-  //        API / SAVE LOGIC
-  // ==========================================
+  // ══════════════════════════════════════════════════════════════════════════
+  //  LOCAL UI ACTIONS (ADD/EDIT/DELETE)
+  // ══════════════════════════════════════════════════════════════════════════
+
+  Future<void> _fetchWifiList() async {
+    if (mounted) setState(() { _isFetchingWifi = true; _savedWifiList.clear(); });
+    await _sendCmd('get_WIFILIST');
+    await Future.delayed(const Duration(seconds: 3));
+    if (mounted) setState(() => _isFetchingWifi = false);
+  }
+
+  void _onNextPressed() {
+    setState(() { _flowStep = 2; _isFetchingWifi = true; _savedWifiList.clear(); });
+    _fetchWifiList();
+  }
+
+  void _reassignSlots() {
+    // Ensures UI slots are always 1, 2, 3... without gaps
+    for (int i = 0; i < _savedWifiList.length; i++) {
+      _savedWifiList[i].slot = i + 1;
+    }
+  }
+
+  void _showAddWifiDialog() {
+    if (_savedWifiList.length >= 5) return;
+    _showWifiInputSheet(title: 'Add Wi-Fi', isAdd: true);
+  }
+
+  void _showEditDialog(_SavedWifi wifi) {
+    _showWifiInputSheet(
+        title: 'Edit Wi-Fi',
+        isAdd: false,
+        targetWifi: wifi,
+        initialSsid: wifi.ssid,
+        initialPass: wifi.pass
+    );
+  }
+
+  void _showWifiInputSheet({required String title, required bool isAdd, _SavedWifi? targetWifi, String? initialSsid, String? initialPass}) {
+    final ssidCtrl = TextEditingController(text: initialSsid);
+    final passCtrl = TextEditingController(text: initialPass);
+    bool obscure = true;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          backgroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
+          content: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(
+              controller: ssidCtrl,
+              decoration: InputDecoration(labelText: 'Network Name (SSID)', border: OutlineInputBorder(borderRadius: BorderRadius.circular(12))),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: passCtrl,
+              obscureText: obscure,
+              decoration: InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                suffixIcon: IconButton(
+                  icon: Icon(obscure ? Icons.visibility_off : Icons.visibility),
+                  onPressed: () => setS(() => obscure = !obscure),
+                ),
+              ),
+            ),
+          ]),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: ClientTheme.textLight))),
+            ElevatedButton(
+              onPressed: () {
+                final ssid = ssidCtrl.text.trim();
+                final pass = passCtrl.text.trim();
+                if (ssid.isEmpty) return;
+
+                setState(() {
+                  if (isAdd) {
+                    _savedWifiList.add(_SavedWifi(slot: 0, ssid: ssid, pass: pass));
+                  } else if (targetWifi != null) {
+                    targetWifi.ssid = ssid;
+                    targetWifi.pass = pass;
+                  }
+                  _reassignSlots(); // Clean up slots
+                });
+                Navigator.pop(ctx);
+              },
+              style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+              child: const Text('Save Locally'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showDeleteConfirm(_SavedWifi wifi) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Remove Wi-Fi?'),
+        content: Text('Remove "${wifi.ssid}" from your configuration list?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: ClientTheme.textLight))),
+          ElevatedButton(
+            onPressed: () {
+              setState(() {
+                _savedWifiList.remove(wifi);
+                _reassignSlots(); // Shift remaining networks up
+              });
+              Navigator.pop(ctx);
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.error, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: const Text('Remove'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  FINAL BATCH SAVE & API SYNC
+  // ══════════════════════════════════════════════════════════════════════════
 
   Future<void> _handleSaveAndNext() async {
-    debugPrint("=== SAVE BUTTON CLICKED ===");
-    _addLog("Initiating Save Sequence...");
-
-    final String newDeviceIdStr = _deviceIdController.text.trim();
-    if (newDeviceIdStr.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Error: No Device ID received from hardware.")),
-      );
+    if (_deviceId.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No Device ID received from hardware.')));
       return;
     }
 
     final clientProvider = Provider.of<ClientProvider>(context, listen: false);
     final int oldRecNo = clientProvider.selectedDeviceRecNo ?? 0;
+    if (oldRecNo == 0) return;
 
-    if (oldRecNo == 0) {
-      _addLog("Error: Invalid Old Device ID (0).");
-      return;
-    }
+    setState(() => _isSyncing = true);
 
-    setState(() => _isCheckingInternet = true);
-
-    // Disconnect Hardware to restore Internet
-    _addLog("Restoring Internet connection...");
     try {
-      _disconnectSocket();
+      // ── 1. SEND ALL 5 BATCH COMMANDS ──
+      print('🚀 [Batch Save] Sending 5 commands to device...');
+      _wifiListOkCompleter = Completer<void>(); // Initialize completer
+
+      for (int i = 1; i <= 5; i++) {
+        String cmd;
+        int listIndex = i - 1;
+
+        if (listIndex < _savedWifiList.length) {
+          // Send actual user network (Fixed pass= typo)
+          final w = _savedWifiList[listIndex];
+          cmd = 'set_WIFI$i::ssid=${w.ssid};pass=${w.pass};';
+        } else {
+          // Fill empty slots with NODEF (Fixed pass= typo)
+          cmd = 'set_WIFI$i::ssid=NODEF;pass=NODEF;';
+        }
+
+        print('📤 [Batch Save] $cmd');
+        await _sendCmd(cmd);
+        // Brief delay so device buffer isn't overwhelmed
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+
+      print('⏳ [Batch Save] Waiting for WIFILIST::OK...');
+      await _wifiListOkCompleter!.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Timeout waiting for WIFILIST::OK response'),
+      );
+      print('✅ [Batch Save] Device confirmed WIFILIST::OK');
+
+      // ── 2. SEND ALLDONE COMMAND ──
+      _allDoneOkCompleter = Completer<void>(); // Initialize completer
+      print('📤 [Batch Save] Sending set_ALLDONE...');
+      await _sendCmd('set_ALLDONE');
+
+      print('⏳ [Batch Save] Waiting for ALLDONE::OK...');
+      await _allDoneOkCompleter!.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () => throw Exception('Timeout waiting for ALLDONE::OK response'),
+      );
+      print('✅ [Batch Save] Device confirmed ALLDONE::OK');
+
+      // ── 3. DISCONNECT & PROCEED TO INTERNET API SYNC ──
+      _socket?.destroy(); _socket = null;
       await WiFiForIoTPlugin.disconnect();
       await WiFiForIoTPlugin.forceWifiUsage(false);
-    } catch (e) {
-      debugPrint("Disconnect Warning: $e");
-    }
+      await Future.delayed(const Duration(seconds: 6));
 
-    _addLog("Waiting for network switch (6s)...");
-    await Future.delayed(const Duration(seconds: 6));
-
-    try {
-      _addLog("Verifying Internet Access...");
       final result = await InternetAddress.lookup('google.com');
+      if (result.isEmpty || result[0].rawAddress.isEmpty) throw Exception('No internet.');
 
-      if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
-        _addLog("Internet Active. Syncing to Database...");
+      final response = await http.post(
+        Uri.parse('${ApiConstants.baseUrl}/device_id_update_api.php'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'action': 'UPDATE_DEVICE_ID', 'OldRecNo': oldRecNo, 'NewRecNo': int.parse(_deviceId)}),
+      );
 
-        final String apiUrl = "${ApiConstants.baseUrl}/device_id_update_api.php";
-        print("DEBUG: Calling API: $apiUrl");
-
-        final response = await http.post(
-          Uri.parse(apiUrl),
-          headers: {"Content-Type": "application/json"},
-          body: jsonEncode({
-            "action": "UPDATE_DEVICE_ID",
-            "OldRecNo": oldRecNo,
-            "NewRecNo": int.parse(newDeviceIdStr),
-          }),
-        );
-
-        debugPrint("API Response: ${response.statusCode} | Body: ${response.body}");
-
-        if (response.statusCode == 200) {
-          final responseData = jsonDecode(response.body);
-
-          if (responseData['status'] == 'success') {
-            _addLog("ID Synchronized Successfully!");
-
-            final int newId = int.parse(newDeviceIdStr);
-            await clientProvider.updateAfterHardwareSync(newId);
-
-            if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text("Device Configured Successfully!"),
-                  backgroundColor: ClientTheme.success,
-                  duration: Duration(seconds: 2),
-                ),
-              );
-              await Future.delayed(const Duration(milliseconds: 1500));
-              widget.onConnected();
-            }
-          } else {
-            throw Exception(responseData['message'] ?? "Update Failed");
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data['status'] == 'success') {
+          await clientProvider.updateAfterHardwareSync(int.parse(_deviceId));
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device Configured Successfully!'), backgroundColor: ClientTheme.success));
+            await Future.delayed(const Duration(milliseconds: 1200));
+            widget.onConnected();
           }
         } else {
-          throw Exception("HTTP Error ${response.statusCode}");
+          throw Exception(data['message'] ?? 'Update failed');
         }
       } else {
-        throw Exception("No Internet Connection detected.");
+        throw Exception('HTTP ${response.statusCode}');
       }
     } catch (e) {
-      debugPrint("SAVE ERROR: $e");
-      _addLog("Error: $e");
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text("Failed: ${e.toString().replaceAll('Exception:', '')}"),
-            backgroundColor: ClientTheme.error,
-          ),
-        );
-      }
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: ClientTheme.error));
     } finally {
-      if (mounted) setState(() => _isCheckingInternet = false);
+      if (mounted) setState(() => _isSyncing = false);
+      _wifiListOkCompleter = null;
+      _allDoneOkCompleter = null;
     }
   }
 
-  // ==========================================
-  //        UI BUILDERS
-  // ==========================================
+
+  // ── Advanced: Reset Memory ─────────────────────────────────────────────────
+  void _showAdvancedSettings() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (ctx) => Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          const Text('Advanced Settings', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text('Use these options only if instructed by support.', style: TextStyle(color: ClientTheme.textLight, fontSize: 13)),
+          const SizedBox(height: 24),
+          ListTile(
+            leading: Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: Colors.red.shade50, borderRadius: BorderRadius.circular(12)),
+              child: Icon(Iconsax.refresh, color: Colors.red.shade600),
+            ),
+            title: const Text('Reset Device Memory', style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: const Text('Clears all stored data on the device.'),
+            trailing: const Icon(Iconsax.arrow_right_3),
+            onTap: () {
+              Navigator.pop(ctx);
+              _confirmResetMemory();
+            },
+          ),
+          const SizedBox(height: 12),
+        ]),
+      ),
+    );
+  }
+
+  void _confirmResetMemory() {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [Icon(Iconsax.warning_2, color: Colors.orange.shade600), const SizedBox(width: 8), const Text('Reset Memory?')]),
+        content: const Text('This will erase all saved data on the device. This action cannot be undone.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await _sendCmd('set_RESETMEM;');
+              if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reset command sent to device.'), backgroundColor: Colors.orange));
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: const Text('Reset'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  PASSWORD DIALOG
+  // ══════════════════════════════════════════════════════════════════════════
+
+  void _showPasswordDialog(String ssid) {
+    final ctrl = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [const Icon(Icons.lock, size: 18), const SizedBox(width: 8), Text('Connect to $ssid', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))]),
+        content: TextField(
+          controller: ctrl, obscureText: true, autofocus: true,
+          decoration: InputDecoration(hintText: 'Enter Password', filled: true, fillColor: Colors.grey.shade50, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none)),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: ClientTheme.textLight))),
+          ElevatedButton(
+            onPressed: () { Navigator.pop(ctx); _connectToWifi(ssid, ctrl.text); },
+            style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+            child: const Text('Connect'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ══════════════════════════════════════════════════════════════════════════
+  //  BUILD
+  // ══════════════════════════════════════════════════════════════════════════
 
   @override
   Widget build(BuildContext context) {
@@ -511,73 +642,49 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
           _buildTopBar(),
           if (!_isEnabled)
             _buildWifiOffState()
-          else if (_isConfiguring)
-            Expanded(child: _buildConfigurationPanel())
-          else
-            Expanded(child: _buildNetworkList()),
+          else if (_flowStep == 0)
+            Expanded(child: _buildScanList())
+          else if (_flowStep == 1)
+              Expanded(child: _buildDeviceIdStep())
+            else
+              Expanded(child: _buildWifiConfigStep()),
         ],
       ),
     );
   }
 
   Widget _buildTopBar() {
+    String title = 'Setup Required';
+    String status = 'Wi-Fi is Off';
+    Color statusColor = ClientTheme.error;
+    if (_isEnabled) {
+      if (_flowStep == 0) { title = 'Connect to Device'; status = 'Scan nearby hotspots'; statusColor = Colors.orange; }
+      if (_flowStep == 1) { title = 'Device Detected'; status = _isSocketConnected ? 'Connected' : 'Disconnected'; statusColor = _isSocketConnected ? ClientTheme.success : Colors.red; }
+      if (_flowStep == 2) { title = 'Wi-Fi Configuration'; status = _isSocketConnected ? 'Connected' : 'Disconnected'; statusColor = _isSocketConnected ? ClientTheme.success : Colors.red; }
+    }
+
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 20, 10, 10),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  _isEnabled
-                      ? (_isConfiguring ? "Device Config" : "Wi-Fi Networks")
-                      : "Setup Required",
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ClientTheme.textDark),
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  children: [
-                    Icon(Icons.circle, size: 8, color: _isSocketConnected ? ClientTheme.success : (_isEnabled ? Colors.orange : ClientTheme.error)),
-                    const SizedBox(width: 6),
-                    Text(
-                      _isEnabled
-                          ? (_isConfiguring
-                          ? (_isSocketConnected ? "Connected" : "Disconnected")
-                          : "Scanning Nearby...")
-                          : "Wi-Fi is Off",
-                      style: TextStyle(color: ClientTheme.textLight, fontSize: 12),
-                    ),
-                  ],
-                ),
-              ],
-            ),
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Text(title, style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ClientTheme.textDark)),
+              const SizedBox(height: 4),
+              Row(children: [
+                Icon(Icons.circle, size: 8, color: statusColor),
+                const SizedBox(width: 6),
+                Text(status, style: TextStyle(color: ClientTheme.textLight, fontSize: 12)),
+              ]),
+            ]),
           ),
-          Row(
-            children: [
-              if (_isEnabled && !_isConfiguring)
-                IconButton(
-                  onPressed: _scanWifi,
-                  icon: _isScanning
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: ClientTheme.primaryColor))
-                      : Icon(Iconsax.refresh, color: ClientTheme.primaryColor),
-                ),
-              if (_isConfiguring && !_isSocketConnected)
-                IconButton(
-                  onPressed: _initSocketConnection,
-                  tooltip: "Reconnect",
-                  icon: const Icon(Iconsax.refresh, color: Colors.orange),
-                ),
-              IconButton(
-                icon: const Icon(Iconsax.close_circle, color: ClientTheme.error),
-                tooltip: "Close Setup",
-                onPressed: () {
-                  _disconnectSocket();
-                  Navigator.of(context).pop();
-                },
-              ),
-            ],
+          if (_flowStep == 0 && _isEnabled)
+            IconButton(onPressed: _scanWifi, icon: _isScanning ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: ClientTheme.primaryColor)) : Icon(Iconsax.refresh, color: ClientTheme.primaryColor)),
+          if (_flowStep == 2)
+            IconButton(icon: Icon(Iconsax.setting_4, color: ClientTheme.primaryColor.withOpacity(0.8)), tooltip: 'Advanced Settings', onPressed: _showAdvancedSettings),
+          IconButton(
+            icon: const Icon(Iconsax.close_circle, color: ClientTheme.error),
+            onPressed: () { _socket?.destroy(); Navigator.of(context).pop(); },
           ),
         ],
       ),
@@ -587,140 +694,42 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
   Widget _buildWifiOffState() {
     return Expanded(
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 10),
-        child: Column(
-          children: [
-            const Spacer(flex: 2),
-            Container(
-              width: 100, height: 100,
-              decoration: BoxDecoration(color: ClientTheme.error.withOpacity(0.05), shape: BoxShape.circle),
-              child: Icon(Iconsax.wifi_square, size: 40, color: ClientTheme.error.withOpacity(0.8)),
-            ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1, 1), end: const Offset(1.15, 1.15), duration: 1.5.seconds).shimmer(duration: 2.seconds, delay: 1.seconds),
-            const SizedBox(height: 24),
-            Text("Turn On Wi-Fi", style: ClientTheme.themeData.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800, color: ClientTheme.textDark)),
-            const SizedBox(height: 12),
-            Text("Enable Wi-Fi to scan and connect\nto your device hotspot.", textAlign: TextAlign.center, style: TextStyle(color: ClientTheme.textLight, height: 1.4, fontSize: 14)),
-            const Spacer(flex: 3),
-            SizedBox(
-              width: double.infinity,
-              height: 56,
-              child: Container(
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), boxShadow: [BoxShadow(color: ClientTheme.primaryColor.withOpacity(0.3), blurRadius: 15, offset: const Offset(0, 8))], gradient: LinearGradient(colors: [ClientTheme.primaryColor, ClientTheme.primaryColor.withOpacity(0.8)], begin: Alignment.topLeft, end: Alignment.bottomRight)),
-                child: Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(16),
-                    onTap: () => WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true),
-                    child: Center(
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: const [
-                          Icon(Iconsax.flash_1, color: Colors.white, size: 22),
-                          SizedBox(width: 10),
-                          Text("ENABLE WI-FI", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.0, fontSize: 15)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(height: 20),
-            TextButton(onPressed: _initializeWifi, child: const Text("I have already enabled it", style: TextStyle(fontSize: 13, decoration: TextDecoration.underline, decorationColor: Colors.black12))),
-            const Spacer(flex: 1),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildConfigurationPanel() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text("Device Information", style: TextStyle(color: ClientTheme.textDark, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-          TextField(controller: _deviceIdController, readOnly: true, decoration: InputDecoration(labelText: "Device ID", filled: true, fillColor: Colors.grey.shade100, prefixIcon: const Icon(Iconsax.mobile), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-          const SizedBox(height: 20),
-          Text("Manual Configuration", style: TextStyle(color: ClientTheme.textDark, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 8),
-
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _getCmdController,
-                  decoration: InputDecoration(
-                    labelText: "Command",
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
-                  ),
-                ),
-              ),
-              const SizedBox(width: 8),
-              ElevatedButton(
-                onPressed: () => _sendCommand(_getCmdController.text),
-                style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.secondaryColor),
-                child: const Text("SEND", style: TextStyle(color: Colors.white)),
-              ),
-            ],
-          ),
-
-          const SizedBox(height: 20),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Text("Communication Log", style: TextStyle(color: ClientTheme.textDark, fontWeight: FontWeight.bold)),
-              if(_isSocketConnected)
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                  decoration: BoxDecoration(color: Colors.green.withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
-                  child: const Text("LIVE", style: TextStyle(color: Colors.green, fontSize: 10, fontWeight: FontWeight.bold)),
-                )
-            ],
-          ),
-          const SizedBox(height: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 24),
+        child: Column(children: [
+          const Spacer(flex: 2),
           Container(
-              height: 150,
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.black87, borderRadius: BorderRadius.circular(12)),
-              child: ListView.builder(
-                  controller: _logScrollController,
-                  itemCount: _logs.length,
-                  itemBuilder: (context, index) => Padding(
-                    padding: const EdgeInsets.only(bottom: 2.0),
-                    child: Text(_logs[index], style: const TextStyle(color: Colors.greenAccent, fontSize: 10, fontFamily: 'Courier')),
-                  )
-              )
-          ),
+            width: 100, height: 100,
+            decoration: BoxDecoration(color: ClientTheme.error.withOpacity(0.05), shape: BoxShape.circle),
+            child: Icon(Iconsax.wifi_square, size: 40, color: ClientTheme.error.withOpacity(0.8)),
+          ).animate(onPlay: (c) => c.repeat(reverse: true)).scale(begin: const Offset(1, 1), end: const Offset(1.15, 1.15), duration: 1.5.seconds),
           const SizedBox(height: 24),
-
+          Text('Turn On Wi-Fi', style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: ClientTheme.textDark)),
+          const Spacer(flex: 3),
           SizedBox(
-            width: double.infinity,
-            height: 50,
-            child: ElevatedButton.icon(
-              onPressed: _isCheckingInternet ? null : _handleSaveAndNext,
-              icon: _isCheckingInternet
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : const Icon(Iconsax.save_2, color: Colors.white),
-              label: Text(
-                  _isCheckingInternet ? "SYNCING..." : "SAVE & CONFIGURE CHANNELS",
-                  style: const TextStyle(fontWeight: FontWeight.bold)
+            width: double.infinity, height: 56,
+            child: Container(
+              decoration: BoxDecoration(borderRadius: BorderRadius.circular(16), gradient: LinearGradient(colors: [ClientTheme.primaryColor, ClientTheme.primaryColor.withOpacity(0.8)])),
+              child: Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(16),
+                  onTap: () => WiFiForIoTPlugin.setEnabled(true, shouldOpenSettings: true),
+                  child: const Center(child: Row(mainAxisSize: MainAxisSize.min, children: [Icon(Iconsax.flash_1, color: Colors.white, size: 22), SizedBox(width: 10), Text('ENABLE WI-FI', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.0, fontSize: 15))])),
+                ),
               ),
-              style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
             ),
           ),
-          const SizedBox(height: 20),
-        ],
+          const SizedBox(height: 16),
+          TextButton(onPressed: _initializeWifi, child: const Text('I have already enabled it', style: TextStyle(fontSize: 13, decoration: TextDecoration.underline))),
+          const Spacer(flex: 1),
+        ]),
       ),
     );
   }
 
-  Widget _buildNetworkList() {
+  Widget _buildScanList() {
     if (_networks.isEmpty && !_isScanning) {
-      return Center(child: Text("No networks found", style: TextStyle(color: ClientTheme.textLight)));
+      return Center(child: Text('No networks found', style: TextStyle(color: ClientTheme.textLight)));
     }
     return RefreshIndicator(
       onRefresh: _scanWifi,
@@ -729,20 +738,22 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
         physics: const AlwaysScrollableScrollPhysics(),
         itemCount: _networks.length,
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-        itemBuilder: (context, index) {
-          final net = _networks[index];
-          bool isCurrent = net.ssid == _currentSSID && _currentSSID != null;
-          bool isSaved = _savedPasswords.containsKey(net.ssid);
-          bool isOpen = net.capabilities?.toUpperCase().contains("WPA") == false;
+        itemBuilder: (context, i) {
+          final net = _networks[i];
+          final isCurrent = net.ssid == _currentSSID && _currentSSID != null;
           return AnimatedContainer(
             duration: 300.ms,
             margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(color: isCurrent ? ClientTheme.primaryColor.withOpacity(0.05) : Colors.white, borderRadius: BorderRadius.circular(16), border: Border.all(color: isCurrent ? ClientTheme.primaryColor : Colors.grey.shade200, width: isCurrent ? 1.5 : 1), boxShadow: isCurrent ? [BoxShadow(color: ClientTheme.primaryColor.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 4))] : []),
+            decoration: BoxDecoration(
+              color: isCurrent ? ClientTheme.primaryColor.withOpacity(0.05) : Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: isCurrent ? ClientTheme.primaryColor : Colors.grey.shade200, width: isCurrent ? 1.5 : 1),
+            ),
             child: ListTile(
-              leading: Container(padding: const EdgeInsets.all(10), decoration: BoxDecoration(color: isCurrent ? ClientTheme.primaryColor : Colors.grey.shade100, shape: BoxShape.circle), child: Icon(Iconsax.wifi, color: isCurrent ? Colors.white : Colors.grey.shade600, size: 20)),
-              title: Text(net.ssid ?? "Hidden Network", style: TextStyle(fontWeight: isCurrent ? FontWeight.w700 : FontWeight.w600, color: isCurrent ? ClientTheme.textDark : ClientTheme.textDark.withOpacity(0.8))),
-              subtitle: Padding(padding: const EdgeInsets.only(top: 6.0), child: Wrap(spacing: 6, children: [if (isCurrent) _badge("Connected", ClientTheme.success), if (isSaved && !isCurrent) _badge("Saved", Colors.green), if (isOpen) _badge("Open", Colors.orange) else Padding(padding: const EdgeInsets.only(top: 2), child: Icon(Icons.lock_outline, size: 12, color: ClientTheme.textLight))])),
-              trailing: isCurrent ? Container(padding: const EdgeInsets.all(4), decoration: BoxDecoration(color: ClientTheme.success, shape: BoxShape.circle), child: const Icon(Icons.check, color: Colors.white, size: 14)) : Icon(Iconsax.arrow_right_3, size: 16, color: ClientTheme.textLight),
+              leading: Icon(Iconsax.wifi, color: isCurrent ? ClientTheme.primaryColor : Colors.grey.shade600),
+              title: Text(net.ssid ?? 'Hidden Network'),
+              subtitle: isCurrent ? const Text('Connected', style: TextStyle(color: ClientTheme.success, fontSize: 12)) : null,
+              trailing: isCurrent ? const Icon(Icons.check, color: ClientTheme.success) : const Icon(Iconsax.arrow_right_3),
               onTap: () => _handleNetworkTap(net),
             ),
           );
@@ -751,22 +762,156 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     );
   }
 
-  Widget _badge(String text, Color color) {
-    return Container(padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2), decoration: BoxDecoration(color: color.withOpacity(0.1), borderRadius: BorderRadius.circular(6), border: Border.all(color: color.withOpacity(0.2))), child: Text(text, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)));
+  Widget _buildDeviceIdStep() {
+    bool hasId = !_isFetchingId && _deviceId.isNotEmpty;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        children: [
+          const SizedBox(height: 10),
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 30, horizontal: 20),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(24),
+              boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 20, offset: const Offset(0, 5))],
+              border: Border.all(color: hasId ? ClientTheme.success.withOpacity(0.3) : Colors.grey.shade200),
+            ),
+            child: Column(
+              children: [
+                if (_isFetchingId)
+                  Container(
+                    width: 80, height: 80,
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: ClientTheme.primaryColor.withOpacity(0.1)),
+                    child: const CircularProgressIndicator(strokeWidth: 3, color: ClientTheme.primaryColor),
+                  )
+                else
+                  Container(
+                    width: 80, height: 80,
+                    decoration: const BoxDecoration(shape: BoxShape.circle, color: ClientTheme.success),
+                    child: const Icon(Iconsax.verify, color: Colors.white, size: 40),
+                  ).animate().scale(curve: Curves.elasticOut, duration: 800.ms),
+
+                const SizedBox(height: 24),
+                Text(_isFetchingId ? 'Communicating...' : 'Device Verified', style: TextStyle(color: ClientTheme.textLight, fontSize: 14, fontWeight: FontWeight.w500)),
+                const SizedBox(height: 8),
+                Text(
+                  hasId ? _deviceId : 'Waiting...',
+                  style: TextStyle(fontSize: 36, fontWeight: FontWeight.bold, color: ClientTheme.textDark, letterSpacing: 2),
+                ).animate().fadeIn(),
+              ],
+            ),
+          ),
+          const SizedBox(height: 40),
+          if (hasId)
+            SizedBox(
+              width: double.infinity, height: 56,
+              child: ElevatedButton.icon(
+                onPressed: _onNextPressed,
+                icon: const Icon(Iconsax.wifi, color: Colors.white),
+                label: const Text('CONFIGURE WI-FI', style: TextStyle(fontWeight: FontWeight.bold, letterSpacing: 1.0, fontSize: 16)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                ),
+              ),
+            ).animate().slideY(begin: 0.2, duration: 400.ms).fadeIn(),
+          if (!_isFetchingId && _deviceId.isEmpty)
+            Column(children: [
+              const Text('Could not retrieve Device ID.', style: TextStyle(color: Colors.red)),
+              TextButton(
+                  onPressed: () async { setState(() => _isFetchingId = true); await _sendCmd('get_DEVICEID'); },
+                  child: const Text('Try Again')
+              ),
+            ]),
+        ],
+      ),
+    );
   }
 
-  void _showPasswordDialog(String ssid) {
-    final controller = TextEditingController();
-    showDialog(
-        context: context,
-        builder: (context) => AlertDialog(
-            backgroundColor: Colors.white,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: Row(children: [const Icon(Icons.lock, size: 18), const SizedBox(width: 8), Text("Connect to $ssid", style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))]),
-            content: TextField(controller: controller, obscureText: true, autofocus: true, decoration: InputDecoration(hintText: "Enter Password", filled: true, fillColor: Colors.grey.shade50, contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12), border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none))),
-            actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: Text("Cancel", style: TextStyle(color: ClientTheme.textLight))),      ElevatedButton(onPressed: () { Navigator.pop(context); _connectToWifi(ssid, controller.text); }, style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))), child: const Text("Connect")),      ],
-    ),
+  Widget _buildWifiConfigStep() {
+    final canAdd = _savedWifiList.length < 5;
+
+    return Column(children: [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+        child: Row(children: [
+          Icon(Iconsax.wifi, color: ClientTheme.primaryColor, size: 18),
+          const SizedBox(width: 8),
+          Text('Saved Networks (${_savedWifiList.length}/5)', style: TextStyle(color: ClientTheme.textDark, fontWeight: FontWeight.w600)),
+        ]),
+      ),
+      Expanded(
+        child: _isFetchingWifi
+            ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [CircularProgressIndicator(color: ClientTheme.primaryColor, strokeWidth: 2), const SizedBox(height: 12), Text('Loading saved networks...', style: TextStyle(color: ClientTheme.textLight))]))
+            : ListView(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          children: [
+            ..._savedWifiList.map((wifi) => _buildWifiTile(wifi)),
+            const SizedBox(height: 8),
+            Opacity(
+              opacity: canAdd ? 1.0 : 0.4,
+              child: InkWell(
+                onTap: canAdd ? _showAddWifiDialog : null,
+                borderRadius: BorderRadius.circular(16),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: canAdd ? ClientTheme.primaryColor.withOpacity(0.4) : Colors.grey.shade300),
+                    borderRadius: BorderRadius.circular(16),
+                    color: canAdd ? ClientTheme.primaryColor.withOpacity(0.03) : Colors.grey.shade50,
+                  ),
+                  child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    Icon(Iconsax.add, color: canAdd ? ClientTheme.primaryColor : Colors.grey),
+                    const SizedBox(width: 8),
+                    Text(canAdd ? 'Add Wi-Fi Network' : 'Maximum 5 Networks Reached', style: TextStyle(color: canAdd ? ClientTheme.primaryColor : Colors.grey, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        child: SizedBox(
+          width: double.infinity, height: 54,
+          child: ElevatedButton.icon(
+            onPressed: _isSyncing ? null : _handleSaveAndNext,
+            icon: _isSyncing ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2)) : const Icon(Iconsax.save_2, color: Colors.white),
+            label: Text(_isSyncing ? 'SYNCING...' : 'SAVE & CONFIGURE CHANNELS', style: const TextStyle(fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(backgroundColor: ClientTheme.primaryColor, foregroundColor: Colors.white, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+          ),
+        ),
+      ),
+    ]);
+  }
+
+  Widget _buildWifiTile(_SavedWifi wifi) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(14), border: Border.all(color: Colors.grey.shade200), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 8, offset: const Offset(0, 2))]),
+      child: ListTile(
+        leading: Container(padding: const EdgeInsets.all(8), decoration: BoxDecoration(color: ClientTheme.primaryColor.withOpacity(0.08), borderRadius: BorderRadius.circular(10)), child: Icon(Iconsax.wifi, color: ClientTheme.primaryColor, size: 20)),
+        title: Text(wifi.ssid, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text('Slot ${wifi.slot} · Password saved', style: TextStyle(fontSize: 11, color: ClientTheme.textLight)),
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            IconButton(
+              icon: Icon(Iconsax.edit, color: Colors.blue.shade400, size: 20),
+              onPressed: () => _showEditDialog(wifi),
+            ),
+            IconButton(
+              icon: Icon(Iconsax.trash, color: Colors.red.shade400, size: 20),
+              onPressed: () => _showDeleteConfirm(wifi),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

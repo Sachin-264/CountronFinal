@@ -13,6 +13,7 @@ import 'package:iconsax_flutter/iconsax_flutter.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'AdminScreens/adminwifisetup.dart';
 import 'theme/app_theme.dart';
 
 // Enum to identify the active screen
@@ -127,6 +128,44 @@ class _MainLayoutState extends State<MainLayout> {
           },
         );
       },
+    );
+  }
+
+  // 🆕 ADMIN: Show WiFi Setup bottom sheet (mobile only)
+  void _showAdminWifiSetup(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.92,
+        minChildSize: 0.5,
+        maxChildSize: 0.97,
+        builder: (_, scrollCtrl) => Container(
+          decoration: const BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          ),
+          child: Column(
+            children: [
+              const SizedBox(height: 12),
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Expanded(
+                child: AdminWifiSetupWidget(
+                  onConfigComplete: () => Navigator.pop(ctx),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -261,6 +300,19 @@ class _MainLayoutState extends State<MainLayout> {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         // --- Animated Options ---
+        // 🆕 WiFi Setup option (admin mobile)
+        _StagedFabOption(
+          icon: Iconsax.wifi,
+          label: 'WiFi Setup',
+          color: Colors.teal,
+          isExpanded: _isFabExpanded,
+          delay: 150.ms,
+          onTap: () {
+            _showAdminWifiSetup(context);
+            setState(() => _isFabExpanded = false);
+          },
+        ),
+        const SizedBox(height: 16),
         _StagedFabOption(
           icon: Iconsax.radar_2,
           label: 'Add Channel',
@@ -674,7 +726,7 @@ class _StyledLogoText extends StatelessWidget {
         // [MODIFIED] Using the theme's logoStyle
         style: GoogleFonts.greatVibes(
           textStyle: AppTheme.logoStyle.copyWith(
-            fontSize: 50,
+            fontSize: 40,
           ),
         ),
 
