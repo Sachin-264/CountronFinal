@@ -484,32 +484,46 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
     if (v.isNotEmpty) await _sendCmd('set_HW_VERSION::$v;');
   }
 
+  // Actively polls for internet instead of a blind wait
+  Future<void> _waitForInternet() async {
+    print('🔄 [Network] Waiting for internet connection...');
+    int retries = 0;
+    const int maxRetries = 20; // 20 attempts * 500ms = 10 seconds max
+
+    while (retries < maxRetries) {
+      try {
+        final result = await InternetAddress.lookup('google.com');
+        if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+          print('✅ [Network] Internet restored in ${retries * 500}ms');
+          return;
+        }
+      } catch (_) {
+        // Not ready yet
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+      retries++;
+    }
+    throw Exception('Timeout waiting for internet connection to restore.');
+  }
+
   Future<void> _saveToDatabase() async {
     print("=========================================");
     print("AdminWifiSetup: 1. STARTING SAVE SEQUENCE");
     print("=========================================");
 
-    // YAHAN LOGIC CHANGE HUA HAI:
-    // Old ID: Jo sabse pehle hardware se aayi thi (background saved)
     final oldIdRaw = _originalDeviceId ?? _deviceIdCtrl.text.trim();
-
-    // New ID: Jo user ne box me type karke send kari hai
     final newIdRaw = _newDeviceIdCtrl.text.trim();
-
     final hwVersion = _hwVersionCtrl.text.trim();
     final swVersion = _swVersionCtrl.text.trim();
     final macId = _macCtrl.text.trim();
 
     if (oldIdRaw.isEmpty) {
-      print("AdminWifiSetup: ERROR - Current Device ID is empty. Hardware didn't send it.");
+      print("AdminWifiSetup: ERROR - Current Device ID is empty.");
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please GET Current Device ID first.')));
       return;
     }
 
-    // Convert to integers
     final oldRecNo = int.tryParse(oldIdRaw) ?? 0;
-
-    // Agar New ID box khali hai, iska matlab usne SET nahi kiya, to Old ID hi New ID ban jayegi
     final newRecNo = newIdRaw.isNotEmpty ? (int.tryParse(newIdRaw) ?? oldRecNo) : oldRecNo;
 
     if (oldRecNo == 0) {
@@ -522,20 +536,34 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
     setState(() => _isSavingDevice = true);
 
     try {
+      // ── NEW FIX: SEND ALLDONE BEFORE DISCONNECTING ──
+      if (_socket != null && _isSocketConnected) {
+        print("AdminWifiSetup: 1.5 Sending ALLDONE to commit hardware changes...");
+        _log('Sending ALLDONE to hardware...');
+        _allDoneOkCompleter = Completer<void>();
+
+        await _sendCmd('set_ALLDONE');
+
+        print("AdminWifiSetup: ⏳ Waiting for ALLDONE::OK...");
+        try {
+          await _allDoneOkCompleter!.future.timeout(const Duration(seconds: 8));
+          print("AdminWifiSetup: ✅ Device confirmed ALLDONE::OK");
+          _log('Verified: ALLDONE::OK');
+        } catch (e) {
+          print("AdminWifiSetup: ⚠️ Timeout waiting for ALLDONE::OK, proceeding anyway...");
+          _log('Warning: No ALLDONE::OK received, proceeding...');
+        }
+      }
+
       print("AdminWifiSetup: 2. Disconnecting socket and Wi-Fi hotspot...");
       _socket?.destroy();
       _socket = null;
       await WiFiForIoTPlugin.disconnect();
       await WiFiForIoTPlugin.forceWifiUsage(false);
 
-      print("AdminWifiSetup: 3. Waiting 6 seconds for OS to restore internet...");
-      await Future.delayed(const Duration(seconds: 6));
-
-      print("AdminWifiSetup: 4. Checking if internet is restored...");
-      final result = await InternetAddress.lookup('google.com');
-      if (result.isEmpty || result[0].rawAddress.isEmpty) {
-        throw Exception('No internet connection restored yet.');
-      }
+      print("AdminWifiSetup: 3. Actively waiting for internet to restore...");
+      // Replaced the 6-second hard delay with active polling
+      await _waitForInternet();
       print("AdminWifiSetup: Internet check passed.");
 
       final requestBody = {
@@ -547,24 +575,17 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
         'MacId': macId
       };
 
-      print("AdminWifiSetup: 5. HITTING API ENDPOINT => ${ApiConstants.baseUrl}/device_id_update_api.php");
-      print("AdminWifiSetup: REQUEST BODY => ${jsonEncode(requestBody)}");
-
+      print("AdminWifiSetup: 5. HITTING API ENDPOINT");
       final response = await http.post(
         Uri.parse('${ApiConstants.baseUrl}/device_id_update_api.php'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode(requestBody),
       );
 
-      print("AdminWifiSetup: 6. API CALL FINISHED");
-      print("AdminWifiSetup: RESPONSE STATUS CODE => ${response.statusCode}");
-      print("AdminWifiSetup: RAW RESPONSE BODY => ${response.body}");
-
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body);
         if (data['status'] == 'success') {
-          print("AdminWifiSetup: 7. Success! Updating provider with NewRecNo: $newRecNo...");
-
+          print("AdminWifiSetup: 7. Success! Updating provider...");
           await clientProvider.updateAfterHardwareSync(newRecNo);
 
           if (mounted) {
@@ -572,7 +593,6 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
             widget.onConfigComplete?.call();
           }
         } else {
-          print("AdminWifiSetup: API Returned Error Status => ${data['message']}");
           throw Exception(data['message'] ?? 'Database update failed');
         }
       } else {
@@ -582,8 +602,9 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
       print("AdminWifiSetup: CAUGHT EXCEPTION => $e");
       if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     } finally {
-      print("AdminWifiSetup: 8. SEQUENCE COMPLETE. Resetting UI state.");
+      print("AdminWifiSetup: 8. SEQUENCE COMPLETE.");
       print("=========================================");
+      _allDoneOkCompleter = null;
       if (mounted) setState(() {
         _isSavingDevice = false;
         _viewState = 0;
@@ -591,9 +612,7 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
     }
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  WIFI ACTIONS (BATCH & FIX)
-  // ══════════════════════════════════════════════════════════════════════════
+
 
   Future<void> _refreshWifiList() async {
     print("AdminWifiSetup: Refreshing WiFi List");

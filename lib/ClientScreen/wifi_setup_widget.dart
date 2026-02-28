@@ -442,10 +442,6 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     );
   }
 
-  // ══════════════════════════════════════════════════════════════════════════
-  //  FINAL BATCH SAVE & API SYNC
-  // ══════════════════════════════════════════════════════════════════════════
-
   Future<void> _handleSaveAndNext() async {
     if (_deviceId.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No Device ID received from hardware.')));
@@ -461,25 +457,23 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     try {
       // ── 1. SEND ALL 5 BATCH COMMANDS ──
       print('🚀 [Batch Save] Sending 5 commands to device...');
-      _wifiListOkCompleter = Completer<void>(); // Initialize completer
+      _wifiListOkCompleter = Completer<void>();
 
       for (int i = 1; i <= 5; i++) {
         String cmd;
         int listIndex = i - 1;
 
         if (listIndex < _savedWifiList.length) {
-          // Send actual user network (Fixed pass= typo)
           final w = _savedWifiList[listIndex];
           cmd = 'set_WIFI$i::ssid=${w.ssid};pass=${w.pass};';
         } else {
-          // Fill empty slots with NODEF (Fixed pass= typo)
           cmd = 'set_WIFI$i::ssid=NODEF;pass=NODEF;';
         }
 
         print('📤 [Batch Save] $cmd');
         await _sendCmd(cmd);
-        // Brief delay so device buffer isn't overwhelmed
-        await Future.delayed(const Duration(milliseconds: 300));
+        // Reduced to 200ms. If your hardware drops packets, revert to 300ms.
+        await Future.delayed(const Duration(milliseconds: 200));
       }
 
       print('⏳ [Batch Save] Waiting for WIFILIST::OK...');
@@ -490,7 +484,7 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
       print('✅ [Batch Save] Device confirmed WIFILIST::OK');
 
       // ── 2. SEND ALLDONE COMMAND ──
-      _allDoneOkCompleter = Completer<void>(); // Initialize completer
+      _allDoneOkCompleter = Completer<void>();
       print('📤 [Batch Save] Sending set_ALLDONE...');
       await _sendCmd('set_ALLDONE');
 
@@ -501,15 +495,16 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
       );
       print('✅ [Batch Save] Device confirmed ALLDONE::OK');
 
-      // ── 3. DISCONNECT & PROCEED TO INTERNET API SYNC ──
-      _socket?.destroy(); _socket = null;
+      // ── 3. DISCONNECT & ACTIVELY WAIT FOR INTERNET ──
+      _socket?.destroy();
+      _socket = null;
       await WiFiForIoTPlugin.disconnect();
       await WiFiForIoTPlugin.forceWifiUsage(false);
-      await Future.delayed(const Duration(seconds: 6));
 
-      final result = await InternetAddress.lookup('google.com');
-      if (result.isEmpty || result[0].rawAddress.isEmpty) throw Exception('No internet.');
+      // Replaced the hardcoded 6-second delay with active polling
+      await _waitForInternet();
 
+      // ── 4. API SYNC ──
       final response = await http.post(
         Uri.parse('${ApiConstants.baseUrl}/device_id_update_api.php'),
         headers: {'Content-Type': 'application/json'},
@@ -521,8 +516,14 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
         if (data['status'] == 'success') {
           await clientProvider.updateAfterHardwareSync(int.parse(_deviceId));
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Device Configured Successfully!'), backgroundColor: ClientTheme.success));
-            await Future.delayed(const Duration(milliseconds: 1200));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Device Configured Successfully!'),
+              backgroundColor: ClientTheme.success,
+              duration: Duration(seconds: 2), // Let the snackbar handle its own timing
+            ));
+
+            // Replaced 1.2s delay with a brief 300ms beat so the UI doesn't feel jarring
+            await Future.delayed(const Duration(milliseconds: 300));
             widget.onConnected();
           }
         } else {
@@ -540,6 +541,27 @@ class _WifiSetupWidgetState extends State<WifiSetupWidget> with WidgetsBindingOb
     }
   }
 
+  // Actively polls for internet instead of a blind wait
+  Future<void> _waitForInternet() async {
+    print('🔄 [Network] Waiting for internet connection...');
+    int retries = 0;
+    const int maxRetries = 20; // 20 attempts * 500ms = 10 seconds max
+
+    while (retries < maxRetries) {
+      try {
+        final result = await InternetAddress.lookup('google.com');
+        if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+          print('✅ [Network] Internet restored in ${retries * 500}ms');
+          return; // Internet is back, exit the loop!
+        }
+      } catch (_) {
+        // Lookup failed, internet not ready yet
+      }
+      await Future.delayed(const Duration(milliseconds: 500));
+      retries++;
+    }
+    throw Exception('Timeout waiting for internet connection to restore.');
+  }
 
   // ── Advanced: Reset Memory ─────────────────────────────────────────────────
   void _showAdvancedSettings() {
