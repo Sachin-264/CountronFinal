@@ -551,13 +551,7 @@ class _ClientLayoutState extends State<ClientLayout> with SingleTickerProviderSt
                 ),
                 const SizedBox(height: 8),
 
-                _buildInfoRow(
-                  icon: Iconsax.tag,
-                  label: "Serial No:",
-                  value: serialNumber,
-                  color: ClientTheme.primaryColor,
-                ),
-                const SizedBox(height: 8),
+
 
 
 

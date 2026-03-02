@@ -742,19 +742,6 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
       print("AdminWifiSetup: ✅ Device confirmed WIFILIST::OK");
       _log('Verified: WIFILIST::OK');
 
-      // 2. Send ALLDONE command and wait
-      _allDoneOkCompleter = Completer<void>();
-      print("AdminWifiSetup: 📤 Sending -> set_ALLDONE");
-      await _sendCmd('set_ALLDONE');
-
-      print("AdminWifiSetup: ⏳ Waiting for ALLDONE::OK...");
-      await _allDoneOkCompleter!.future.timeout(
-        const Duration(seconds: 10),
-        onTimeout: () => throw Exception('Timeout waiting for ALLDONE::OK response'),
-      );
-
-      print("AdminWifiSetup: ✅ Device confirmed ALLDONE::OK");
-      _log('Verified: ALLDONE::OK');
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('WiFi Synced Successfully! Disconnecting...'), backgroundColor: Colors.green));
@@ -771,7 +758,6 @@ class _AdminWifiSetupWidgetState extends State<AdminWifiSetupWidget> with Widget
     } finally {
       // Clean up completers
       _wifiListOkCompleter = null;
-      _allDoneOkCompleter = null;
     }
   }
 

@@ -176,9 +176,15 @@ class _AddClientScreenState extends State<AddClientScreen> {
 
   // === Username Verification Logic ===
   Future<void> _verifyUsername() async {
-    final username = _usernameController.text;
+    final username = _usernameController.text.trim();
     if (username.isEmpty) {
       setState(() => _usernameError = 'Username is required');
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: const Text('Please enter a username to verify.'),
+        backgroundColor: Colors.orange,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
       return;
     }
     setState(() { _isLoading = true; _verifyState = VerifyState.checking; _usernameError = ''; });
@@ -186,13 +192,44 @@ class _AddClientScreenState extends State<AddClientScreen> {
       final bool exists = await _apiService.checkUsernameExists(username);
       if (exists) {
         setState(() { _verifyState = VerifyState.unavailable; _usernameError = 'Taken'; _isUsernameVerified = false; });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.cancel_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text('"$username" is already taken. Try another.')),
+          ]),
+          backgroundColor: AppTheme.accentRed,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ));
       } else {
         setState(() { _verifyState = VerifyState.available; _usernameError = ''; _isUsernameVerified = true; });
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Row(children: [
+            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Expanded(child: Text('"$username" is available!')),
+          ]),
+          backgroundColor: AppTheme.accentGreen,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          duration: const Duration(seconds: 3),
+        ));
       }
     } catch (e) {
       setState(() { _verifyState = VerifyState.none; _usernameError = 'Error'; _isUsernameVerified = false; });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text('Error checking username: $e'),
+        backgroundColor: AppTheme.accentRed,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -210,8 +247,12 @@ class _AddClientScreenState extends State<AddClientScreen> {
           _showErrorSnackbar('Please meet all password requirements.');
           return;
         }
+        if (_verifyState == VerifyState.unavailable) {
+          _showErrorSnackbar('Username is already taken. Please choose a different one.');
+          return;
+        }
         if (!_isUsernameVerified) {
-          _showErrorSnackbar('Please verify the username.');
+          _showErrorSnackbar('Please verify the username first.');
           return;
         }
 

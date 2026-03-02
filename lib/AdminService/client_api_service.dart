@@ -196,7 +196,10 @@ class ClientApiService {
       }),
     );
     final data = _handleResponse(response);
-    return (data[0]['exists'] == 1);
+    // PHP converts 'exists' to bool (true/false) before sending.
+    // Must handle both bool and int (1/0) to be safe.
+    final raw = data[0]['exists'];
+    return (raw == true || raw == 1);
   }
 
 

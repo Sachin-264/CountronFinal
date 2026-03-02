@@ -82,4 +82,15 @@ class SessionManager {
     final prefs = await _getPrefs();
     return prefs.getString(_kCurrentStep) ?? '';
   }
+
+  // --- FILE STORAGE USER SCOPING ---
+  /// Returns a safe, filesystem-friendly unique ID for the current logged-in user.
+  /// Used by ExportService to isolate each account's files in their own folder.
+  /// Priority: RecNo → ClientID → ContactEmail → 'default'
+  static Future<String> getUserId() async {
+    final data = await getUserData();
+    final id = data['RecNo'] ?? data['ClientID'] ?? data['ContactEmail'] ?? 'default';
+    // Sanitize: keep only alphanumeric + underscore (safe for folder names)
+    return id.toString().replaceAll(RegExp(r'[^\w]'), '_');
+  }
 }

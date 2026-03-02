@@ -16,6 +16,7 @@ import 'package:open_filex/open_filex.dart';
 import 'package:archive/archive.dart'; // REQUIRED FOR DOCX
 
 import '../ClientScreen/ViewData/channel_data_model.dart';
+import '../provider/session_manager.dart';
 
 class ExportService {
   static const String _imageBaseUrl = "https://storage.googleapis.com/upload-images-34/images/LMS/";
@@ -588,16 +589,25 @@ class ExportService {
   // ===========================================================================
   // FILE SAVING & UTILS
   // ===========================================================================
+
+  /// Returns the user-scoped reports directory path.
+  /// Each user gets their own isolated folder: .../Reports/<userId>/
+  Future<String> _getUserReportDirPath() async {
+    final directory = await getApplicationDocumentsDirectory();
+    final userId = await SessionManager.getUserId();
+    return '${directory.path}/Reports/$userId';
+  }
+
   Future<void> _saveFile(Uint8List bytes, String fileName, String extension, MimeType type) async {
     try {
       if (kIsWeb) {
         await FileSaver.instance.saveFile(name: fileName, bytes: bytes, fileExtension: extension, mimeType: type);
       } else {
-        final directory = await getApplicationDocumentsDirectory();
-        final reportDir = Directory('${directory.path}/Reports');
+        final dirPath = await _getUserReportDirPath();
+        final reportDir = Directory(dirPath);
         if (!await reportDir.exists()) await reportDir.create(recursive: true);
 
-        final path = "${reportDir.path}/$fileName.$extension";
+        final path = "$dirPath/$fileName.$extension";
         final file = File(path);
         await file.writeAsBytes(bytes, flush: true);
         await Future.delayed(const Duration(milliseconds: 300));
@@ -611,8 +621,8 @@ class ExportService {
 
   Future<List<FileSystemEntity>> getDownloadedFiles() async {
     if (kIsWeb) return [];
-    final directory = await getApplicationDocumentsDirectory();
-    final reportDir = Directory('${directory.path}/Reports');
+    final dirPath = await _getUserReportDirPath();
+    final reportDir = Directory(dirPath);
     if (await reportDir.exists()) {
       final files = reportDir.listSync();
       files.sort((a, b) => b.statSync().modified.compareTo(a.statSync().modified));
